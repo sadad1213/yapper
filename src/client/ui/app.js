@@ -618,7 +618,7 @@ function quit() {
   term.styleReset()
   term.clear()
   term.fullscreen(false)
-  term.showCursor()
+  process.stdout.write('\x1b[?25h')   // show cursor (terminal-kit compat)
   process.exit(0)
 }
 
@@ -630,7 +630,7 @@ async function runUpdate() {
   term.styleReset()
   term.clear()
   term.fullscreen(false)
-  term.showCursor()
+  process.stdout.write('\x1b[?25h')   // show cursor (terminal-kit compat)
 
   const { spawn } = await import('child_process')
   console.log('\n' + '─'.repeat(40))

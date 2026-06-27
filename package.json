@@ -16,7 +16,7 @@
   "scripts": {
     "start": "node bin/yapper.js",
     "server": "node bin/yapper.js server",
-    "postinstall": "node -e \"try{const{execSync}=require('child_process');const d=process.cwd();const h=execSync('git rev-parse HEAD',{encoding:'utf8',cwd:d}).trim();require('fs').writeFileSync(require('path').join(d,'src','version.js'),'export const BUILD_HASH = '+JSON.stringify(h)+';\\n')}catch(e){}\""
+    "postinstall": "node -e \"try{const{execSync}=require('child_process');const{existsSync,writeFileSync}=require('fs');const{join}=require('path');const d=process.cwd();if(existsSync(join(d,'.git'))){const h=execSync('git rev-parse HEAD',{encoding:'utf8',cwd:d}).trim();writeFileSync(join(d,'src','version.js'),'export const BUILD_HASH = '+JSON.stringify(h)+';\\n')}}catch(e){}\""
   },
   "keywords": [
     "voip",
