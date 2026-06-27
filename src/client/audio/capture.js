@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events'
-import { isSilent } from './vad.js'
+import { isSilent, level } from './vad.js'
 
 export const SAMPLE_RATE = 48000
 export const CHANNELS = 1
@@ -35,6 +35,7 @@ export class Capture extends EventEmitter {
     while (this._buf.length >= FRAME_BYTES) {
       const frame = this._buf.slice(0, FRAME_BYTES)
       this._buf = this._buf.slice(FRAME_BYTES)
+      this.emit('level', level(frame))         // always, for the VU meter
       if (!isSilent(frame)) {
         try {
           const encoded = this.encoder.encode(frame, FRAME_SIZE)

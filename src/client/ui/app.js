@@ -5,12 +5,11 @@ const term = termkit.terminal
 const config = new Conf({ projectName: 'yapper' })
 
 const VERSION = '0.1.0'
-const LEFT_INNER = 22   // visible chars in left panel (not counting border/divider)
-const PORT = 4747
+const LEFT_W = 22            // inner width of the left (rooms) panel
 
 // ─── State ─────────────────────────────────────────────────────────────────
 export const state = {
-  rooms: [],                  // [{ name, users: [{id, name, muted}] }]
+  rooms: [],                 // [{ name, users: [{id, name, muted}] }]
   currentRoom: null,
   selectedIdx: 0,
   username: String(config.get('username') || ('user' + (Math.floor(Math.random() * 9000) + 1000))),
@@ -18,340 +17,495 @@ export const state = {
   muted: false,
   connected: false,
   serverAddr: null,
-  talking: new Set(),         // set of userIds currently sending audio
+  talking: new Set(),
+  selfLevel: 0,              // live mic level of the local user (0..1)
 }
 
-// Set these from ws-client.js to wire up network actions
 export const handlers = {
-  onJoin: null,
-  onLeave: null,
-  onCreate: null,
-  onMute: null,
-  onDisconnect: null,
+  onJoin: null, onLeave: null, onCreate: null, onMute: null, onDisconnect: null,
+}
+
+let audioApi = null          // injected via registerAudio()
+
+// ─── UI runtime ──────────────────────────────────────────────────────────────
+const ui = {
+  sb: null,
+  dirty: true,
+  loopTimer: null,
+  modal: null,               // settings overlay
+  prompt: null,              // text-input overlay (new room)
+  statusZones: [],           // clickable status-bar segments
+}
+
+// ─── Drawing primitives ───────────────────────────────────────────────────────
+function putStr(x, y, str, attr) {
+  if (!ui.sb || y < 0 || y >= ui.sb.height) return
+  ui.sb.put({ x, y, attr: attr || {}, wrap: false, dx: 1, dy: 0 }, '%s', str)
+}
+
+function padEnd(s, w) {
+  s = String(s)
+  return s.length > w ? s.slice(0, w) : s + ' '.repeat(w - s.length)
+}
+
+function bar(level, w) {
+  const n = Math.max(0, Math.min(w, Math.round(level * w)))
+  return '█'.repeat(n) + '·'.repeat(w - n)
+}
+
+const BLK = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']
+function animBars(seed, w) {
+  const t = Date.now() / 100
+  let s = ''
+  for (let i = 0; i < w; i++) {
+    const v = (Math.sin(t + i * 0.7 + seed * 1.3) + 1) / 2
+    s += BLK[Math.floor(v * (BLK.length - 1))]
+  }
+  return s
+}
+
+function levelAttr(l) {
+  if (l > 0.85) return { color: 'red' }
+  if (l > 0.6)  return { color: 'yellow' }
+  return { color: 'green' }
+}
+
+// Terminal size can be Infinity/undefined when stdout is not a TTY — clamp it.
+function clampDim(v, fallback) {
+  return Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback
+}
+function makeScreen() {
+  return new termkit.ScreenBuffer({ dst: term, width: clampDim(term.width, 80), height: clampDim(term.height, 24) })
 }
 
 // ─── Layout ────────────────────────────────────────────────────────────────
-function lay() {
-  const W = term.width || 80
-  const H = term.height || 24
-  const divX = LEFT_INNER + 2    // col 24 = 1(left border) + 22(inner) + 1(divider)
-  const firstRow = 4             // first content row
-  const lastRow = H - 3          // last content row
-  const statusRow = H - 1
-  return { W, H, divX, firstRow, lastRow, statusRow }
+function L() {
+  const W = ui.sb.width, H = ui.sb.height
+  const divX = LEFT_W + 1
+  const headerRow = 1, ulineRow = 2, firstRow = 3
+  const sepRow = H - 3, statusRow = H - 2
+  const lastRow = sepRow - 1
+  const rightX = divX + 2
+  const rightW = Math.max(4, W - rightX - 2)
+  return { W, H, divX, headerRow, ulineRow, firstRow, sepRow, statusRow, lastRow, rightX, rightW }
 }
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
-function pad(str, width) {
-  const s = String(str)
-  if (s.length >= width) return s.slice(0, width)
-  return s + ' '.repeat(width - s.length)
+// ─── Render ────────────────────────────────────────────────────────────────
+function drawAll() {
+  const sb = ui.sb
+  if (!sb) return
+  sb.fill({ char: ' ', attr: {} })
+  drawFrame()
+  drawRooms()
+  drawUsers()
+  drawStatus()
+  if (ui.modal) drawModal()
+  if (ui.prompt) drawPrompt()
+  sb.draw({ delta: true })
 }
 
-// ─── Full render ────────────────────────────────────────────────────────────
-export function render() {
-  term.clear()
-  const l = lay()
-  drawFrame(l)
-  drawRoomPanel(l)
-  drawUserPanel(l)
-  drawStatusBar(l)
-  term.hideCursor()
-}
+function drawFrame() {
+  const { W, H, divX, headerRow, ulineRow, sepRow, statusRow, lastRow, rightX, rightW } = L()
+  const dim = { dim: true }
 
-function drawFrame(l) {
-  const { W, H, divX } = l
-  const title = ` yapper v${VERSION} `
-  const srv = state.connected ? ` ${state.serverAddr} ` : ' not connected '
-  const fillTotal = Math.max(0, W - 2 - title.length - srv.length)
-  const fillL = Math.floor(fillTotal / 2)
-  const fillR = fillTotal - fillL
+  // top + bottom borders
+  putStr(0, 0, '╭' + '─'.repeat(W - 2) + '╮', dim)
+  putStr(0, H - 1, '╰' + '─'.repeat(W - 2) + '╯', dim)
+  putStr(2, 0, ' yapper ', { color: 'cyan', bold: true })
 
-  // Row 1: top border
-  term.moveTo(1, 1)
-  term('┌')
-  term.bold.cyan(title)
-  term('─'.repeat(fillL))
-  term.dim(srv)
-  term('─'.repeat(fillR))
-  term('┐')
+  // connection status (top-right)
+  const txt = state.connected ? (state.serverAddr || 'connected') : 'connecting…'
+  const seg = ` ${txt} `
+  const sx = Math.max(12, W - 2 - seg.length - 2)
+  putStr(sx, 0, '●', state.connected ? { color: 'green' } : { color: 'red' })
+  putStr(sx + 2, 0, txt, dim)
 
-  // Row 2: column headers
-  const rightInner = W - divX - 2
-  const roomLabel = state.currentRoom ? `IN ROOM: ${state.currentRoom}` : 'IN ROOM: -'
-  term.moveTo(1, 2)
-  term('│')
-  term.bold(' ' + pad('ROOMS', LEFT_INNER) + ' ')
-  term('│')
-  term.bold(' ' + pad(roomLabel, rightInner) + ' ')
-  term('│')
+  // side borders + divider
+  for (let y = 1; y <= statusRow; y++) { putStr(0, y, '│', dim); putStr(W - 1, y, '│', dim) }
+  for (let y = 1; y <= lastRow; y++) putStr(divX, y, '│', dim)
 
-  // Row 3: sub-header separator
-  term.moveTo(1, 3)
-  term('│')
-  term.dim(' ' + '─'.repeat(LEFT_INNER) + ' ')
-  term('│')
-  term.dim(' ' + '─'.repeat(rightInner) + ' ')
-  term('│')
+  // separator above status bar
+  putStr(0, sepRow, '├' + '─'.repeat(W - 2) + '┤', dim)
+  putStr(divX, sepRow, '┴', dim)
 
-  // Rows 4..H-3: side borders
-  for (let y = 4; y <= H - 3; y++) {
-    term.moveTo(1, y)('│')
-    term.moveTo(divX, y)('│')
-    term.moveTo(W, y)('│')
+  // headers
+  putStr(2, headerRow, 'ROOMS', { bold: true })
+  const room = state.rooms.find(r => r.name === state.currentRoom)
+  const title = state.currentRoom || 'no room joined'
+  putStr(rightX, headerRow, title, state.currentRoom ? { color: 'cyan', bold: true } : dim)
+  if (room) {
+    const cnt = `${room.users.length} online`
+    putStr(W - 2 - cnt.length, headerRow, cnt, dim)
   }
-
-  // Row H-2: separator above status bar (┴ at divider col)
-  term.moveTo(1, H - 2)
-  term('├' + '─'.repeat(divX - 2) + '┴' + '─'.repeat(W - divX - 1) + '┤')
-
-  // Row H-1: status bar side borders
-  term.moveTo(1, H - 1)('│')
-  term.moveTo(W, H - 1)('│')
-
-  // Row H: bottom border
-  term.moveTo(1, H)
-  term('└' + '─'.repeat(W - 2) + '┘')
+  putStr(2, ulineRow, '─'.repeat(LEFT_W - 1), dim)
+  putStr(rightX, ulineRow, '─'.repeat(rightW), dim)
 }
 
-function drawRoomPanel(l) {
-  const { firstRow, lastRow } = l
-  const btnRow = lastRow - 1      // [+ New Room] fixed near bottom
-  let row = firstRow
+function drawRooms() {
+  const { firstRow, lastRow } = L()
+  const newRow = lastRow
+  let y = firstRow
 
-  state.rooms.forEach((room, idx) => {
-    if (row >= btnRow) return     // don't overdraw [+ New Room] position
-    const isCurrent = state.currentRoom === room.name
-    const isSelected = state.selectedIdx === idx
-    const prefix = isCurrent ? '▶ ' : '  '
-    const count = `(${room.users.length})`
-    const namepart = prefix + room.name
-    const spacer = Math.max(1, LEFT_INNER - namepart.length - count.length)
-    const line = namepart + ' '.repeat(spacer) + count
-
-    term.moveTo(2, row)
-    if (isSelected && !isCurrent) term.bgBlue.white(' ' + pad(line, LEFT_INNER) + ' ')
-    else if (isCurrent)            term.green(' ' + pad(line, LEFT_INNER) + ' ')
-    else                           term(' ' + pad(line, LEFT_INNER) + ' ')
-    row++
+  state.rooms.forEach((r, idx) => {
+    if (y >= newRow) return
+    const cur = state.currentRoom === r.name
+    const sel = state.selectedIdx === idx && !ui.modal && !ui.prompt
+    const icon = cur ? '▸' : ' '
+    const count = String(r.users.length)
+    const label = `${icon} ${r.name}`
+    const line = padEnd(label, LEFT_W - 1 - count.length) + count
+    const attr = sel ? { bgColor: 'cyan', color: 'black' }
+               : cur ? { color: 'green', bold: true } : {}
+    putStr(1, y, padEnd(line, LEFT_W), attr)
+    y++
   })
 
-  // [+ New Room] button
-  if (btnRow >= firstRow) {
-    const isSelected = state.selectedIdx === state.rooms.length
-    term.moveTo(2, btnRow)
-    if (isSelected) term.bgBlue.white(' ' + pad('[+ New Room]', LEFT_INNER) + ' ')
-    else            term.dim(' ' + pad('[+ New Room]', LEFT_INNER) + ' ')
-  }
+  // + new room
+  const sel = state.selectedIdx === state.rooms.length && !ui.modal && !ui.prompt
+  putStr(1, newRow, padEnd('+ new room', LEFT_W), sel ? { bgColor: 'cyan', color: 'black' } : { dim: true })
 }
 
-function drawUserPanel(l) {
-  const { W, divX, firstRow, lastRow } = l
-  const rightInner = W - divX - 2
-  const col = divX + 2
+function drawUsers() {
+  const { rightX, rightW, firstRow, lastRow } = L()
 
   if (!state.currentRoom) {
-    const msg = 'Click or press Enter to join a room'
-    const midRow = Math.floor((firstRow + lastRow) / 2)
-    term.moveTo(col, midRow)
-    term.dim(pad(msg, rightInner))
+    putStr(rightX, Math.floor((firstRow + lastRow) / 2), 'Select a room on the left and press Enter to join.', { dim: true })
     return
   }
 
   const room = state.rooms.find(r => r.name === state.currentRoom)
   const others = (room?.users ?? []).filter(u => u.id !== state.userId)
-  let row = firstRow
-
-  for (const user of others) {
-    if (row > lastRow) break
-    const isTalking = state.talking.has(user.id)
-    const prefix = isTalking ? '▶ ' : '· '
-    const suffix = user.muted ? ' [muted]' : isTalking ? ' [talking]' : ''
-    const line = prefix + user.name + suffix
-    term.moveTo(col, row)
-    if (isTalking) term.green(pad(line, rightInner))
-    else           term(pad(line, rightInner))
-    row++
+  let y = firstRow
+  for (const u of others) {
+    if (y > lastRow - 1) break
+    drawUserRow(y, u.name, { talking: state.talking.has(u.id), muted: u.muted, seed: u.id })
+    y++
   }
 
-  // Show self at the bottom (always)
-  if (row <= lastRow) {
-    const prefix = state.muted ? 'x ' : '· '
-    const suffix = state.muted ? ' [muted]' : ''
-    const line = prefix + state.username + suffix + ' (you)'
-    term.moveTo(col, row)
-    if (state.muted) term.red(pad(line, rightInner))
-    else             term.cyan(pad(line, rightInner))
+  // self pinned to the last content row
+  drawUserRow(lastRow, state.username + ' (you)', {
+    talking: !state.muted && state.selfLevel > 0.05,
+    muted: state.muted, self: true, level: state.selfLevel,
+  })
+}
+
+function drawUserRow(y, name, o) {
+  const { rightX, rightW } = L()
+  const icon = o.muted ? '⊘' : (o.talking ? '◉' : '○')
+  const iconAttr = o.muted ? { color: 'red' } : (o.talking ? { color: 'green', bold: true } : { dim: true })
+  putStr(rightX, y, icon, iconAttr)
+
+  const nameAttr = o.self ? { color: 'cyan' } : (o.talking ? { bold: true } : {})
+  putStr(rightX + 2, y, padEnd(name, 16), nameAttr)
+
+  const meterX = rightX + 19
+  const meterW = Math.max(6, Math.min(14, rightW - 21))
+  if (o.muted)        putStr(meterX, y, 'muted', { color: 'red', dim: true })
+  else if (o.self)    putStr(meterX, y, bar(o.level || 0, meterW), levelAttr(o.level || 0))
+  else if (o.talking) putStr(meterX, y, animBars(o.seed || 1, meterW), { color: 'green' })
+  else                putStr(meterX, y, 'idle', { dim: true })
+}
+
+function drawStatus() {
+  const { statusRow } = L()
+  ui.statusZones = []
+  let x = 2
+  const seg = (label, action, attr) => {
+    putStr(x, statusRow, label, attr || {})
+    ui.statusZones.push({ x0: x, x1: x + label.length - 1, action })
+    x += label.length + 3
   }
+  seg(state.muted ? '[M] unmute' : '[M] mute', toggleMute, state.muted ? { color: 'red', bold: true } : {})
+  seg('[N] new room', promptNewRoom)
+  seg('[S] settings', openSettings)
+  seg('[Q] quit', quit)
 }
 
-function drawStatusBar(l) {
-  const { W, statusRow } = l
-  const muteHint = state.muted ? '[M] Unmute' : '[M] Mute  '
-  const bar = ` ${muteHint}  [N] New Room  [S] Settings  [Q] Quit  arrows/click to navigate`
-  term.moveTo(2, statusRow)
-  term.dim(pad(bar, W - 2))
+// ─── Overlays ────────────────────────────────────────────────────────────────
+function drawModal() {
+  const { W, H } = L()
+  const m = ui.modal
+  const bw = Math.min(54, W - 4), bh = 12
+  const bx = Math.floor((W - bw) / 2), by = Math.floor((H - bh) / 2)
+  m.rect = { bx, by, bw, bh }
+  const C = { color: 'cyan' }
+
+  putStr(bx, by, '╭' + '─'.repeat(bw - 2) + '╮', C)
+  for (let i = 1; i < bh - 1; i++) {
+    putStr(bx, by + i, '│', C)
+    putStr(bx + 1, by + i, ' '.repeat(bw - 2), {})
+    putStr(bx + bw - 1, by + i, '│', C)
+  }
+  putStr(bx, by + bh - 1, '╰' + '─'.repeat(bw - 2) + '╯', C)
+  putStr(bx + 2, by, ' settings ', { color: 'cyan', bold: true })
+
+  const ix = bx + 2, rw = bw - 4
+  m.rowsY = [by + 2, by + 4, by + 6, by + 10]
+
+  const uval = (m.editing && m.row === 0) ? m.edit + '█' : state.username
+  modalField(ix, by + 2, rw, 'username', uval, m.row === 0)
+
+  const dev = m.devices?.[m.devIdx]?.name || 'default'
+  modalField(ix, by + 4, rw, 'microphone', '‹ ' + dev + ' ›', m.row === 1)
+
+  const tlabel = m.testing ? '■ stop test  (speak — you should hear yourself)' : '▶ test microphone'
+  modalField(ix, by + 6, rw, '', tlabel, m.row === 2)
+  if (m.testing)        putStr(ix + 1, by + 7, bar(m.testLevel || 0, rw - 2), levelAttr(m.testLevel || 0))
+  else if (m.testError) putStr(ix + 1, by + 7, 'audio backend not available', { color: 'red', dim: true })
+
+  putStr(ix + 1, by + 8, '↑↓ move · enter select · ‹ › device · esc close', { dim: true })
+  modalField(ix, by + 10, rw, '', '[ close ]', m.row === 3)
 }
 
-// ─── Input ─────────────────────────────────────────────────────────────────
-let inputLocked = false
+function modalField(ix, y, rw, label, value, sel) {
+  const text = label ? padEnd(label, 11) + ' ' + value : value
+  putStr(ix, y, padEnd(' ' + text, rw), sel ? { bgColor: 'cyan', color: 'black' } : {})
+}
 
-function handleKey(name) {
-  if (inputLocked) return
-  const total = state.rooms.length + 1  // +1 for [+ New Room]
+function drawPrompt() {
+  const { W, H } = L()
+  const p = ui.prompt
+  const bw = Math.min(44, W - 4), bh = 5
+  const bx = Math.floor((W - bw) / 2), by = Math.floor((H - bh) / 2)
+  const C = { color: 'cyan' }
+  putStr(bx, by, '╭' + '─'.repeat(bw - 2) + '╮', C)
+  for (let i = 1; i < bh - 1; i++) {
+    putStr(bx, by + i, '│', C)
+    putStr(bx + 1, by + i, ' '.repeat(bw - 2), {})
+    putStr(bx + bw - 1, by + i, '│', C)
+  }
+  putStr(bx, by + bh - 1, '╰' + '─'.repeat(bw - 2) + '╯', C)
+  putStr(bx + 2, by, ' ' + p.title + ' ', { color: 'cyan', bold: true })
+  putStr(bx + 2, by + 2, '> ' + p.value + '█', {})
+  putStr(bx + 2, by + bh - 1, ' enter ok · esc cancel ', { dim: true })
+}
+
+// ─── Input: keyboard ──────────────────────────────────────────────────────────
+function handleKey(name, matches, data) {
+  if (name === 'CTRL_C') return quit()
+  if (ui.prompt) return handlePromptKey(name, data)
+  if (ui.modal)  return handleModalKey(name, data)
 
   switch (name) {
-    case 'UP':
-      state.selectedIdx = (state.selectedIdx - 1 + total) % total
-      render(); break
-    case 'DOWN':
-      state.selectedIdx = (state.selectedIdx + 1) % total
-      render(); break
-    case 'ENTER':
-      if (state.selectedIdx === state.rooms.length) promptNewRoom()
-      else if (state.rooms[state.selectedIdx]) joinRoom(state.rooms[state.selectedIdx].name)
-      break
+    case 'UP':    move(-1); break
+    case 'DOWN':  move(1); break
+    case 'ENTER': activateSelection(); break
     case 'm': case 'M': toggleMute(); break
-    case 's': case 'S': showSettings(); break
+    case 's': case 'S': openSettings(); break
     case 'n': case 'N': promptNewRoom(); break
-    case 'q': case 'Q': case 'CTRL_C': quit(); break
+    case 'q': case 'Q': quit(); break
   }
 }
 
-function handleMouse(name, data) {
-  if (inputLocked) return
-  const { x, y } = data
-  const l = lay()
-  const { divX, firstRow, lastRow, statusRow } = l
+function handlePromptKey(name, data) {
+  const p = ui.prompt
+  if (name === 'ENTER')          { ui.prompt = null; p.onSubmit(p.value); ui.dirty = true }
+  else if (name === 'ESCAPE')    { ui.prompt = null; ui.dirty = true }
+  else if (name === 'BACKSPACE') { p.value = p.value.slice(0, -1); ui.dirty = true }
+  else if (data?.isCharacter)    { p.value += String.fromCodePoint(data.codepoint); ui.dirty = true }
+}
 
-  if (name === 'MOUSE_WHEEL_UP') {
-    state.selectedIdx = Math.max(0, state.selectedIdx - 1)
-    render(); return
+function handleModalKey(name, data) {
+  const m = ui.modal
+  if (m.editing) {
+    if (name === 'ENTER')          { state.username = (m.edit.trim() || state.username).slice(0, 32); config.set('username', state.username); m.editing = false }
+    else if (name === 'ESCAPE')    { m.editing = false }
+    else if (name === 'BACKSPACE') { m.edit = m.edit.slice(0, -1) }
+    else if (data?.isCharacter && m.edit.length < 32) { m.edit += String.fromCodePoint(data.codepoint) }
+    ui.dirty = true
+    return
   }
-  if (name === 'MOUSE_WHEEL_DOWN') {
-    state.selectedIdx = Math.min(state.rooms.length, state.selectedIdx + 1)
-    render(); return
+  switch (name) {
+    case 'UP':    m.row = (m.row + 3) % 4; ui.dirty = true; break
+    case 'DOWN':  m.row = (m.row + 1) % 4; ui.dirty = true; break
+    case 'LEFT':  if (m.row === 1) cycleDevice(-1); break
+    case 'RIGHT': if (m.row === 1) cycleDevice(1); break
+    case 'ENTER': modalActivate(); break
+    case 's': case 'S': case 'q': case 'Q': case 'ESCAPE': closeSettings(); break
   }
+}
+
+// ─── Input: mouse ─────────────────────────────────────────────────────────────
+function handleMouse(name, data) {
+  const x = data.x - 1, y = data.y - 1   // terminal is 1-based, buffer 0-based
+
+  if (ui.prompt) {              // click anywhere outside closes the prompt
+    return
+  }
+  if (ui.modal) return handleModalMouse(name, x, y)
+
+  if (name === 'MOUSE_WHEEL_UP')   { move(-1); return }
+  if (name === 'MOUSE_WHEEL_DOWN') { move(1);  return }
   if (name !== 'MOUSE_LEFT_BUTTON_PRESSED') return
 
-  // Left panel click
+  const { firstRow, lastRow, divX, statusRow } = L()
+
   if (x >= 1 && x < divX && y >= firstRow && y <= lastRow) {
-    const btnRow = lastRow - 1
-    if (y === btnRow) {
-      state.selectedIdx = state.rooms.length
-      promptNewRoom()
-    } else {
+    if (y === lastRow) { state.selectedIdx = state.rooms.length; promptNewRoom() }
+    else {
       const idx = y - firstRow
-      if (idx >= 0 && idx < state.rooms.length) {
-        state.selectedIdx = idx
-        joinRoom(state.rooms[idx].name)
-      }
+      if (idx >= 0 && idx < state.rooms.length) { state.selectedIdx = idx; joinRoom(state.rooms[idx].name) }
     }
+    ui.dirty = true
+    return
   }
 
-  // Status bar shortcut clicks
   if (y === statusRow) {
-    if (x >= 2 && x <= 13)  toggleMute()
-    if (x >= 16 && x <= 28) promptNewRoom()
-    if (x >= 31 && x <= 42) showSettings()
+    for (const z of ui.statusZones) {
+      if (x >= z.x0 && x <= z.x1) { z.action(); break }
+    }
+  }
+}
+
+function handleModalMouse(name, x, y) {
+  if (name !== 'MOUSE_LEFT_BUTTON_PRESSED') return
+  const m = ui.modal
+  if (!m.rect) return
+  const { bx, by, bw, bh } = m.rect
+  if (x < bx || x > bx + bw - 1 || y < by || y > by + bh - 1) { closeSettings(); return }
+  if (m.rowsY) {
+    for (let i = 0; i < m.rowsY.length; i++) {
+      if (y === m.rowsY[i]) { m.row = i; modalActivate(); return }
+    }
   }
 }
 
 // ─── Actions ───────────────────────────────────────────────────────────────
+function move(d) {
+  const total = state.rooms.length + 1
+  state.selectedIdx = (state.selectedIdx + d + total) % total
+  ui.dirty = true
+}
+
+function activateSelection() {
+  if (state.selectedIdx === state.rooms.length) promptNewRoom()
+  else if (state.rooms[state.selectedIdx]) joinRoom(state.rooms[state.selectedIdx].name)
+}
+
 function joinRoom(name) {
   if (name === state.currentRoom) return
-  if (handlers.onJoin) {
-    handlers.onJoin(name)
-  } else {
-    state.currentRoom = name
-    render()
-  }
+  if (handlers.onJoin) handlers.onJoin(name)
+  else state.currentRoom = name
+  ui.dirty = true
 }
 
 function toggleMute() {
   state.muted = !state.muted
-  if (handlers.onMute) handlers.onMute(state.muted)
-  render()
+  handlers.onMute?.(state.muted)
+  ui.dirty = true
 }
 
-async function promptNewRoom() {
-  if (inputLocked) return
-  inputLocked = true
-  const l = lay()
-
-  // Redraw status bar as an input prompt
-  term.moveTo(2, l.statusRow)
-  term(pad('', l.W - 2))
-  term.moveTo(2, l.statusRow)
-  term(' New room name: ')
-
-  const input = await new Promise(resolve =>
-    term.inputField({ cancelable: true, style: term.white }, (err, val) => resolve(val))
-  )
-  inputLocked = false
-
-  if (input && input.trim()) {
-    const name = input.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-')
-    if (handlers.onCreate) {
-      handlers.onCreate(name)
-    } else {
-      if (!state.rooms.find(r => r.name === name)) state.rooms.push({ name, users: [] })
-      state.selectedIdx = state.rooms.findIndex(r => r.name === name)
-      state.currentRoom = name
-    }
+function promptNewRoom() {
+  ui.prompt = {
+    title: 'new room',
+    value: '',
+    onSubmit: (val) => {
+      const name = val.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
+      if (!name) return
+      if (handlers.onCreate) handlers.onCreate(name)
+      else {
+        if (!state.rooms.find(r => r.name === name)) state.rooms.push({ name, users: [] })
+        state.currentRoom = name
+      }
+      state.selectedIdx = Math.max(0, state.rooms.findIndex(r => r.name === name))
+    },
   }
-  render()
+  ui.dirty = true
 }
 
-async function showSettings() {
-  if (inputLocked) return
-  inputLocked = true
-  const l = lay()
+// ─── Settings modal ───────────────────────────────────────────────────────────
+function openSettings() {
+  const devices = audioApi?.getInputDevices ? audioApi.getInputDevices() : [{ id: -1, name: 'default' }]
+  ui.modal = { row: 0, editing: false, edit: '', devices, devIdx: 0, testing: false, testLevel: 0, testError: false }
+  ui.dirty = true
+}
 
-  term.moveTo(2, l.statusRow)
-  term(pad('', l.W - 2))
-  term.moveTo(2, l.statusRow)
-  term(` Username [${state.username}]: `)
+function closeSettings() {
+  stopMicTest()
+  ui.modal = null
+  ui.dirty = true
+}
 
-  const input = await new Promise(resolve =>
-    term.inputField({ default: state.username, cancelable: true, style: term.white }, (err, val) => resolve(val))
-  )
-  inputLocked = false
+function modalActivate() {
+  const m = ui.modal
+  if (m.row === 0)      { m.editing = true; m.edit = state.username; ui.dirty = true }
+  else if (m.row === 1) cycleDevice(1)
+  else if (m.row === 2) toggleMicTest()
+  else if (m.row === 3) closeSettings()
+}
 
-  if (input !== null && input.trim()) {
-    state.username = input.trim().slice(0, 32)
-    config.set('username', state.username)
-  }
-  render()
+function cycleDevice(dir) {
+  const m = ui.modal
+  if (!m.devices?.length) return
+  m.devIdx = (m.devIdx + dir + m.devices.length) % m.devices.length
+  audioApi?.setInputDevice?.(m.devices[m.devIdx].id)
+  if (m.testing) { stopMicTest(); startMicTestInternal() }
+  ui.dirty = true
+}
+
+function toggleMicTest() {
+  if (ui.modal.testing) stopMicTest()
+  else startMicTestInternal()
+}
+
+function startMicTestInternal() {
+  const m = ui.modal
+  if (!audioApi?.available || !audioApi.startMicTest) { m.testError = true; ui.dirty = true; return }
+  m.testing = true; m.testLevel = 0; m.testError = false
+  m._stop = audioApi.startMicTest((lvl) => { m.testLevel = Math.max((m.testLevel || 0) * 0.6, lvl); ui.dirty = true })
+  ui.dirty = true
+}
+
+function stopMicTest() {
+  const m = ui.modal
+  if (m?._stop) { m._stop(); m._stop = null }
+  if (m) { m.testing = false; m.testLevel = 0 }
+  ui.dirty = true
 }
 
 function quit() {
-  if (handlers.onDisconnect) handlers.onDisconnect()
+  handlers.onDisconnect?.()
+  clearInterval(ui.loopTimer)
+  term.grabInput(false)
+  term.styleReset()
+  term.clear()
   term.fullscreen(false)
   term.showCursor()
-  term.grabInput(false)
   process.exit(0)
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────
-export function updateState(patch) {
-  Object.assign(state, patch)
-  render()
-}
+export function updateState(patch) { Object.assign(state, patch); ui.dirty = true }
 
 export function markTalking(userId, active) {
   if (active) state.talking.add(userId)
   else state.talking.delete(userId)
-  render()
+  ui.dirty = true
+}
+
+export function setSelfLevel(l) { state.selfLevel = Math.max(state.selfLevel, l); ui.dirty = true }
+
+export function registerAudio(api) { audioApi = api }
+
+function loop() {
+  state.selfLevel = Math.max(0, state.selfLevel - 0.06)   // smooth release
+  const animating = state.talking.size > 0 || ui.modal?.testing || state.selfLevel > 0.01
+  if (ui.dirty || animating) { drawAll(); ui.dirty = false }
 }
 
 export function startUI() {
-  config.set('username', state.username)   // ensure persisted
+  config.set('username', state.username)
   term.fullscreen(true)
   term.hideCursor()
   term.grabInput({ mouse: 'button' })
   term.on('key', handleKey)
   term.on('mouse', handleMouse)
-  term.on('resize', render)
-  render()
+  term.on('resize', () => {
+    ui.sb = makeScreen()
+    term.clear()
+    ui.dirty = true
+  })
+  ui.sb = makeScreen()
+  ui.dirty = true
+  ui.loopTimer = setInterval(loop, 50)
 }

@@ -48,26 +48,34 @@ else if (command === 'setup') {
 
 // ── Client mode ───────────────────────────────────────────────────────────────
 else {
-  const { startUI, handlers } = await import('./client/ui/app.js')
+  const { startUI, handlers, registerAudio, setSelfLevel } = await import('./client/ui/app.js')
   const { connect, wireHandlers, setAudioQueue, sendAudio } = await import('./client/network/ws-client.js')
   const { discoverServer }  = await import('./client/network/discovery.js')
-  const { initAudio, startCapture, stopCapture } = await import('./client/audio/index.js')
+  const audio = await import('./client/audio/index.js')
+  const { startCapture, stopCapture, getInputDevices, setInputDevice, startMicTest, audioEvents } = audio
 
-  // 1. Check audio — show setup wizard if missing (before TUI)
-  let audioResult = await initAudio()
-  if (!audioResult.available) {
+  // 1. Check audio — show setup wizard if missing (only when interactive)
+  let audioResult = await audio.initAudio()
+  if (!audioResult.available && process.stdin.isTTY) {
     const { runSetup } = await import('./setup.js')
     await runSetup()
-    audioResult = await initAudio()  // re-check after setup
+    audioResult = await audio.initAudio()  // re-check after setup
   }
 
-  // 2. Start TUI
+  // 2. Inject audio controls into the UI (settings modal, mic test, VU meter)
+  registerAudio({
+    available: audioResult.available,
+    getInputDevices, setInputDevice, startMicTest,
+  })
+  audioEvents.on('level', l => setSelfLevel(l))
+
+  // 3. Start TUI
   startUI()
 
-  // 3. Wire network handlers first so setupAudioHooks can wrap them
+  // 4. Wire network handlers first so the audio hooks can wrap them
   wireHandlers()
 
-  // 4. Wrap audio around network handlers
+  // 5. Wrap audio capture around join/leave
   if (audioResult.available) {
     setAudioQueue(audioResult.queueFrame)
 
@@ -89,7 +97,7 @@ else {
     }
   }
 
-  // 5. Connect to server
+  // 6. Connect to server
   const targetUrl = (command === 'connect' && positionals[1]) ? positionals[1] : null
 
   async function tryConnect() {
