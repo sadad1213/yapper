@@ -3,6 +3,7 @@ import Conf from 'conf'
 import { createRequire } from 'module'
 import { getThreshold, setThreshold } from '../audio/vad.js'
 import { getUserVolume, setUserVolume } from '../audio/playback.js'
+import { notifyRoomsChanged, notifyUpdateFound } from '../audio/notifications.js'
 import { checkForUpdate, clearPendingUpdate, resetUpdateCache, fetchChangelog } from '../../auto-update.js'
 
 const term = termkit.terminal
@@ -793,7 +794,7 @@ async function checkUpdateNow() {
   if (!ui.modal) return                       // closed while checking
   if (ver) {
     m.checkStatus = 'update'; m.updateVer = ver
-    updateAvailable = true; ui.dirty = true
+    updateAvailable = true; notifyUpdateFound(); ui.dirty = true
   } else {
     m.checkStatus = 'latest'; ui.dirty = true
     m._checkTimer = setTimeout(() => {
@@ -862,7 +863,13 @@ async function runUpdate() {
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────
-export function updateState(patch) { Object.assign(state, patch); ui.dirty = true }
+export function updateState(patch) {
+  if (patch.rooms !== undefined) {
+    notifyRoomsChanged(patch.rooms, patch.currentRoom ?? state.currentRoom, patch.userId ?? state.userId)
+  }
+  Object.assign(state, patch)
+  ui.dirty = true
+}
 
 export function markTalking(userId, active) {
   if (active) state.talking.add(userId)
@@ -913,5 +920,5 @@ export function startUI() {
   }
 
   // Check for updates in the background
-  checkForUpdate().then(ver => { if (ver) { updateAvailable = true; ui.dirty = true } })
+  checkForUpdate().then(ver => { if (ver) { updateAvailable = true; notifyUpdateFound(); ui.dirty = true } })
 }

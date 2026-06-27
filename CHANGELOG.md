@@ -6,6 +6,27 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.1.29
+
+### Русский
+- Звуковые уведомления:
+  - короткий восходящий сигнал, когда кто-то заходит в вашу комнату;
+  - нисходящий сигнал, когда кто-то выходит из вашей комнаты;
+  - тройной мажорный перезвон при обнаружении доступного обновления.
+  Все звуки синтезируются на лету (PCM-волны), внешние файлы не нужны.
+  Слышны только события в той комнате, где вы находитесь; чужие комнаты
+  молчат. При первом входе в комнату существующие участники не
+  вызывают сигналов.
+
+### English
+- Sound notifications:
+  - short rising chime when someone joins your current room;
+  - falling chime when someone leaves your current room;
+  - three-note ascending chime when an update is found.
+  All sounds are synthesised on-the-fly (PCM waveforms), no external files
+  needed. You hear only events in the room you're sitting in; other rooms stay
+  silent. Existing occupants don't trigger sounds when you first join a room.
+
 ## 0.1.28
 
 ### Русский
