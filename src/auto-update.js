@@ -19,7 +19,8 @@ export async function checkForUpdate() {
     })
     if (!res.ok) return null
     const { sha } = await res.json()
-    if (sha && sha !== BUILD_HASH) {
+    const lastSeen = config.get('lastSeenHash', BUILD_HASH)
+    if (sha && sha !== lastSeen) {
       config.set('updateAvailable', sha)
       return sha
     }
@@ -35,5 +36,7 @@ export function getPendingUpdate() {
 }
 
 export function clearPendingUpdate() {
+  const sha = config.get('updateAvailable')
+  if (sha) config.set('lastSeenHash', sha)
   config.delete('updateAvailable')
 }
