@@ -51,9 +51,10 @@ export function resetUpdateCache() {
   _checked = false
 }
 
-// Runs a live network check and caches the result in conf. Separated from
-// checkForUpdate() so manual re-checks can bypass the once-per-session guard.
-async function _doCheck() {
+// Runs a live network check and caches the result in conf.  When
+// `throwOnError` is true, network / GitHub errors are thrown instead of
+// swallowed — used by the manual check so the UI can show "failed".
+async function _doCheck(throwOnError = false) {
   const current = getCurrentVersion()
   if (!current) return null
   try {
@@ -61,7 +62,10 @@ async function _doCheck() {
       headers: { 'User-Agent': 'yapper', 'Accept': 'application/vnd.github.v3+json' },
       signal: AbortSignal.timeout(5000),
     })
-    if (!res.ok) return getPendingUpdate()
+    if (!res.ok) {
+      if (throwOnError) throw new Error(`GitHub returned ${res.status}`)
+      return getPendingUpdate()
+    }
     const data = await res.json()
     const remotePkg = JSON.parse(Buffer.from(data.content, 'base64').toString('utf8'))
     const remote = parseVersion(remotePkg.version)
@@ -71,9 +75,18 @@ async function _doCheck() {
     }
     config.delete('updateAvailable')
     return null
-  } catch {
+  } catch (e) {
+    if (throwOnError) throw e
     return getPendingUpdate()
   }
+}
+
+/** Same as checkForUpdate() but throws on network/GitHub errors so the UI can
+ *  show a distinct "failed" state.  Used by the manual check button. */
+export async function checkForUpdateManual() {
+  resetUpdateCache()
+  _checked = true
+  return _doCheck(true)
 }
 
 export function clearPendingUpdate() {

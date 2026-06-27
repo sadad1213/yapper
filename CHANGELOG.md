@@ -6,6 +6,29 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.0
+
+### Русский
+- Полностью удалены синтезированные PCM-звуки. Только настоящие аудиофайлы
+  из audio/ (snd_splash.wav — вход, mus_doorclose.ogg — выход,
+  mus_piano7.wav — обновление). Встроен чистый JS WAV-декодер
+  (44100→48000, стерео→моно) как фолбек для .wav без SoX.
+- Ручная проверка обновлений теперь различает «обновлений нет» и «ошибка
+  сети / GitHub rate limit» — в последнем случае показывает
+  «× check failed (rate limit / offline)» вместо ложного «✓ up to date».
+  Стартовая автопроверка ошибки не показывает (чтобы не раздражать при
+  каждом запуске), но молча не врёт — кнопка [U] просто не появляется.
+
+### English
+- Removed all synthesised PCM sounds. Only real audio files from audio/
+  (snd_splash.wav — join, mus_doorclose.ogg — leave, mus_piano7.wav —
+  update). Built-in pure-JS WAV decoder (44100→48000, stereo→mono) as
+  fallback for .wav when SoX is unavailable.
+- Manual update check now distinguishes "no update" from "network error /
+  GitHub rate limit" — shows "× check failed (rate limit / offline)" instead
+  of falsely claiming "✓ up to date". Startup auto-check stays silent on
+  errors (no false [U] button).
+
 ## 0.1.30
 
 ### Русский

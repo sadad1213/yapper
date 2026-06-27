@@ -5,7 +5,7 @@ import { getThreshold, setThreshold } from '../audio/vad.js'
 import { getUserVolume, setUserVolume } from '../audio/playback.js'
 import { notifyRoomsChanged, notifyUpdateFound } from '../audio/notifications.js'
 import { preloadAll } from '../audio/loader.js'
-import { checkForUpdate, clearPendingUpdate, resetUpdateCache, fetchChangelog } from '../../auto-update.js'
+import { checkForUpdate, clearPendingUpdate, checkForUpdateManual, fetchChangelog } from '../../auto-update.js'
 
 const term = termkit.terminal
 const config = new Conf({ projectName: 'yapper' })
@@ -364,15 +364,15 @@ function drawModal() {
   modalField(ix, by + 8, rw, 'sensitivity', '‹ ' + thr + ' ›', m.row === 3)
 
   // Row 4: check for updates — status shown inline so the button doubles as
-  // a result line ("up to date" / "update vX available"). Sticky while there
-  // is a pending update; transient otherwise (auto-clears after 4s). Note: a
-  // network failure is indistinguishable from "no update" here because
-  // checkForUpdate() falls back to the cached value on error.
+  // a result line ("up to date" / "update vX available" / "check failed").
+  // Sticky while there is a pending update; transient otherwise (auto-clears
+  // after 4s).
   const csel = m.row === 4
   let cval, cattr
   if (m.checkStatus === 'checking')    { cval = '⟳ checking…';                                      cattr = { color: 'yellow' } }
   else if (m.checkStatus === 'update') { cval = '! update v' + m.updateVer + ' available — press [U]'; cattr = { color: 'yellow', bold: true } }
   else if (m.checkStatus === 'latest') { cval = '✓ you are up to date';                                cattr = { color: 'green' } }
+  else if (m.checkStatus === 'failed') { cval = '× check failed (rate limit / offline)';              cattr = { color: 'red', dim: true } }
   else                                 { cval = '▶ check for updates';                               cattr = {} }
   putStr(ix, by + 10, padEnd(' ' + cval, rw), csel ? { bgColor: 'cyan', color: 'black' } : cattr)
 
@@ -789,10 +789,19 @@ async function checkUpdateNow() {
   if (m.checkStatus === 'checking') return
   if (m._checkTimer) { clearTimeout(m._checkTimer); m._checkTimer = null }
   m.checkStatus = 'checking'; m.updateVer = null; ui.dirty = true
-  resetUpdateCache()
   let ver
-  try { ver = await checkForUpdate() } catch { ver = null }
-  if (!ui.modal) return                       // closed while checking
+  try {
+    ver = await checkForUpdateManual()        // throws on network error
+  } catch {
+    ver = null
+    if (!ui.modal) return
+    m.checkStatus = 'failed'; ui.dirty = true
+    m._checkTimer = setTimeout(() => {
+      if (ui.modal) { ui.modal.checkStatus = null; ui.dirty = true }
+    }, 4000)
+    return
+  }
+  if (!ui.modal) return
   if (ver) {
     m.checkStatus = 'update'; m.updateVer = ver
     updateAvailable = true; notifyUpdateFound(); ui.dirty = true
