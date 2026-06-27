@@ -24,6 +24,7 @@ export class SoxCapture extends EventEmitter {
 
   start() {
     // sox [input device args] [format args] - (stdout)
+    this.quit()   // kill any orphaned process from a previous start
     this._proc = spawn('sox', [...inputArgs(this.deviceId), ...rawArgs, '-'], { stdio: ['ignore', 'pipe', 'ignore'] })
     this._proc.stdout.on('data', chunk => this.emit('data', chunk))
     this._proc.on('error', err => this.emit('error', err))

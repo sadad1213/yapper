@@ -22,7 +22,11 @@ export function initPlayback(dec, stream) {
 }
 
 export function startMixer() {
-  if (timer) return
+  if (timer) {
+    clearInterval(timer)          // reset — room switch must start fresh
+    timer = null
+    users.clear()
+  }
   startTime = Date.now()
   framesWritten = 0
   // Tick faster than the frame rate; the wall-clock drift correction in tick()

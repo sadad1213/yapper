@@ -391,6 +391,7 @@ function activateSelection() {
 
 function joinRoom(name) {
   if (name === state.currentRoom) return
+  if (state.currentRoom && handlers.onLeave) handlers.onLeave()   // leave old room before joining new one
   if (handlers.onJoin) handlers.onJoin(name)
   else state.currentRoom = name
   ui.dirty = true

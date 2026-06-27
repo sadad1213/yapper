@@ -17,6 +17,7 @@ export class Capture extends EventEmitter {
   }
 
   start() {
+    if (this.active) return                    // already capturing — no duplicate listeners or processes
     this.active = true
     this.stream.on('data', this._bound)
     if (this.stream.start) this.stream.start()
