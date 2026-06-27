@@ -58,7 +58,7 @@ function handleSignal(ws, msg) {
 
 function handleAudio(ws, data) {
   const sender = clients.get(ws)
-  if (!sender || !sender.room) return
+  if (!sender || !sender.room || sender.muted) return
 
   // Prepend 1-byte userId so the receiver knows who is talking
   const frame = Buffer.allocUnsafe(1 + data.length)
