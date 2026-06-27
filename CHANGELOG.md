@@ -6,6 +6,20 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.1.21
+
+### Русский
+- Обновлён README: новый скриншот интерфейса отражает текущий UI — список
+  участников под каждой комнатой, кнопка `+ new room` внизу сайдбара, статусбар
+  с `[C] changelog` и версией. Дописаны горячие клавиши ESC (покиуть комнату) и
+  C (changelog).
+
+### English
+- Updated README: the new UI screenshot reflects the current interface —
+  participants listed under every room, `+ new room` pinned at the sidebar
+  bottom, status bar with `[C] changelog` and the version. Added the ESC
+  (leave room) and C (changelog) hotkeys to the key list.
+
 ## 0.1.20
 
 ### Русский

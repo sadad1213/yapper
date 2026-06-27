@@ -5,17 +5,28 @@ accounts — run it on a LAN (or a Hamachi/Radmin VPN) and start talking. Mouse-
 driven TUI with rooms, a live mic meter, and a built-in audio setup wizard.
 
 ```
-╭ yapper ─────────────────────────── ● 192.168.1.5:4747 ─╮
-│ ROOMS               │ general                  2 online │
-│ ─────────────       │ ──────────────────────────────────│
-│ ▸ general    2      │  ◉ you (you)        speaking       │
-│   gaming     0      │  ○ alice            idle           │
-│   music      0      │                                    │
-│   + new room        │  your mic   ████████░░░░░░          │
-├─────────────────────┴────────────────────────────────────┤
-│ [M] mute  [N] new room  [S] settings  [Q] quit          │
-╰──────────────────────────────────────────────────────────╯
+╭ yapper ──────────────────────────────────────────── ● 192.168.1.5:4747 ╮
+│ ROOMS                 │ general                               2 online │
+│ ───────────────────── │ ─────────────────────────────────────────── │
+│ ▸ general           2 │ ◉ you (you)      speaking                      │
+│ ├─ me (you)           │ ○ alice          idle                          │
+│ └─ alice              │                                                │
+│   gaming            2 │                                                │
+│ ├─ bob                │                                                │
+│ └─ cara               │                                                │
+│   music             0 │                                                │
+│ ───────────────────── │ your mic   ████████░░░░░░                      │
+│ + new room            │                                                │
+├───────────────────────┴────────────────────────────────────────────────┤
+│[M] mute  [N] new room  [S] settings  [C] changelog  [Q] quit    v0.1.21│
+╰────────────────────────────────────────────────────────────────────────╯
 ```
+
+The left sidebar lists **every room and who's in it** — not just your current
+one — so you can see who's hanging out in `music` while you sit in `general`.
+You show up under your own room marked `(you)`. After an update, a transient
+`[C] changelog` hint appears next to the version (bottom-right) with what
+changed in RU + EN, and auto-hides after 30 seconds.
 
 ## Install
 
@@ -55,11 +66,14 @@ yapper --help
 
 ### In the TUI
 
-- **Arrows / mouse** — navigate and click rooms
-- **Enter / click** — join a room
-- **M** — mute / unmute
-- **N** — create a new room
-- **S** — settings (username, microphone, mic test)
+- **Arrows / mouse** — navigate and click rooms / users
+- **Enter / click** — join a room (or open a user's volume popup)
+- **ESC** — leave the current room (or close any open popup/modal)
+- **M** — mute / unmute yourself
+- **N** — create a new room (`+ new room` lives at the bottom of the sidebar)
+- **S** — settings (username, microphone, mic test, VAD sensitivity)
+- **C** — open the changelog (shown after an update, to the left of the version; auto-hides after 30s)
+- **U** — install the latest update (shown in the status bar when one is available)
 - **Q** — quit
 
 ### Over Hamachi / Radmin
