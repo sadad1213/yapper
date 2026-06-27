@@ -7,6 +7,10 @@ import { checkForUpdate, clearPendingUpdate, fetchChangelog } from '../../auto-u
 
 const term = termkit.terminal
 const config = new Conf({ projectName: 'yapper' })
+// Captured at module load (before startUI writes anything): tells an update from
+// an old version (conf already had data → existing user) apart from a genuinely
+// fresh install (conf empty). Only existing users get the "what's new" hint.
+const _hadConfig = Object.keys(config.store).length > 0
 
 const require = createRequire(import.meta.url)
 const VERSION = require('../../../package.json').version
@@ -38,9 +42,9 @@ export const handlers = {
 
 let audioApi = null          // injected via registerAudio()
 let updateAvailable = false  // set by checkForUpdate() after startup — remote version is newer
-let pendingVersion = null    // the remote version string when updateAvailable
 const SEEN_KEY = 'lastSeenVersion'
 let whatsNew = false          // local VERSION differs from last seen — show "what's new" changelog
+let whatsNewTimer = null      // auto-hide the hint 30s after launch
 
 // ─── UI runtime ──────────────────────────────────────────────────────────────
 const ui = {
@@ -283,13 +287,20 @@ function drawStatus() {
   seg('[N] new room', promptNewRoom)
   seg('[S] settings', openSettings)
   if (updateAvailable) seg('[U] update!', runUpdate, { color: 'yellow', bold: true })
-  if (updateAvailable || whatsNew) seg('[C] changelog', openChangelog, { color: 'cyan', bold: whatsNew })
   seg('[Q] quit', quit)
 
-  // Version in the bottom-right corner
+  // Version in the bottom-right corner, with a transient "what's new" changelog
+  // hint to its left — same dim style as the version, auto-hides after 30s.
   const { W } = L()
   const ver = `v${VERSION}`
-  putStr(W - ver.length - 2, statusRow, ver, { dim: true })
+  const vX = W - ver.length - 2
+  putStr(vX, statusRow, ver, { dim: true })
+  if (whatsNew) {
+    const label = '[C] changelog'
+    const lx = vX - label.length - 1
+    putStr(lx, statusRow, label, { dim: true })
+    ui.statusZones.push({ x0: lx, x1: lx + label.length - 1, action: openChangelog })
+  }
 }
 
 // ─── Overlays ────────────────────────────────────────────────────────────────
@@ -481,7 +492,7 @@ function handleKey(name, matches, data) {
     case 'm': case 'M': toggleMute(); break
     case 's': case 'S': openSettings(); break
     case 'n': case 'N': promptNewRoom(); break
-    case 'c': case 'C': if (updateAvailable || whatsNew) openChangelog(); break
+    case 'c': case 'C': if (whatsNew) openChangelog(); break
     case 'u': case 'U': if (updateAvailable) runUpdate(); break
     case 'q': case 'Q': quit(); break
   }
@@ -717,18 +728,17 @@ function stopMicTest() {
 }
 
 async function openChangelog() {
-  // Prefer the pending-update version's changelog; otherwise show "what's new"
-  // for the local version after an upgrade.
-  const version = updateAvailable ? pendingVersion : VERSION
-  ui.changelog = { title: version ? `v${version}` : 'changelog', rawLines: null, lines: [], scroll: 0, rect: null }
+  // Show "what's new" for the local version (the one you just updated to).
+  clearTimeout(whatsNewTimer)
+  config.set(SEEN_KEY, VERSION)
+  whatsNew = false
+  ui.changelog = { title: `v${VERSION}`, rawLines: null, lines: [], scroll: 0, rect: null }
   ui.dirty = true
-  const raw = await fetchChangelog(version)
+  const raw = await fetchChangelog(VERSION)
   if (!ui.changelog) return                       // closed while fetching
   ui.changelog.rawLines = raw || ['(changelog unavailable)']
   ui.changelog.scroll = 0
   wrapChangelog()
-  // Mark this local version as seen — the "what's new" hint goes away
-  if (!updateAvailable) { config.set(SEEN_KEY, VERSION); whatsNew = false }
 }
 
 function quit() {
@@ -812,11 +822,19 @@ export function startUI() {
   ui.dirty = true
   ui.loopTimer = setInterval(loop, 50)
 
-  // Mark current version as "seen" on a fresh install so we don't advertise
-  // a changelog for the version you already have on first run.
-  if (!config.get(SEEN_KEY)) config.set(SEEN_KEY, VERSION)
-  whatsNew = config.get(SEEN_KEY) !== VERSION
+  // "What's new" hint: show the changelog button next to the version only for
+  // existing users whose last seen version differs from the running one. A
+  // fresh install (no prior conf data) stays quiet. The hint auto-hides after 30s.
+  whatsNew = _hadConfig && config.get(SEEN_KEY) !== VERSION
+  if (whatsNew) {
+    clearTimeout(whatsNewTimer)
+    whatsNewTimer = setTimeout(() => {
+      config.set(SEEN_KEY, VERSION)
+      whatsNew = false
+      ui.dirty = true
+    }, 30000)
+  }
 
   // Check for updates in the background
-  checkForUpdate().then(ver => { if (ver) { updateAvailable = true; pendingVersion = ver; ui.dirty = true } })
+  checkForUpdate().then(ver => { if (ver) { updateAvailable = true; ui.dirty = true } })
 }

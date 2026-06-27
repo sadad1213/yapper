@@ -6,6 +6,22 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.1.17
+
+### Русский
+- Кнопка «changelog» теперь стоит слева от версии (справа снизу), такого же
+  цвета, и автоматически исчезает через 30 секунд. Появляется только после
+  обновления до новой версии, а не на чистой установке.
+- Исправлен баг, из-за которого кнопка не появлялась вообще (раньше версия
+  помечалась «просмотренной» ещё до показа).
+
+### English
+- The "changelog" button now sits to the left of the version (bottom-right),
+  in the same color, and auto-hides after 30 seconds. It only appears after
+  an update to a new version, not on a fresh install.
+- Fixed a bug where the button never showed at all (the version was marked
+  "seen" before the hint was ever displayed).
+
 ## 0.1.16
 
 ### Русский

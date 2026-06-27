@@ -1,6 +1,6 @@
 {
   "name": "yapper",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "Fast, low-memory CLI voice chat for the terminal — serverless LAN, mouse-driven TUI",
   "type": "module",
   "bin": {
