@@ -3,7 +3,7 @@ import Conf from 'conf'
 import { createRequire } from 'module'
 import { getThreshold, setThreshold } from '../audio/vad.js'
 import { getUserVolume, setUserVolume } from '../audio/playback.js'
-import { checkForUpdate, clearPendingUpdate, fetchChangelog } from '../../auto-update.js'
+import { checkForUpdate, clearPendingUpdate, resetUpdateCache, fetchChangelog } from '../../auto-update.js'
 
 const term = termkit.terminal
 const config = new Conf({ projectName: 'yapper' })
@@ -326,7 +326,7 @@ function drawStatus() {
 function drawModal() {
   const { W, H } = L()
   const m = ui.modal
-  const bw = Math.min(54, W - 4), bh = 14
+  const bw = Math.min(54, W - 4), bh = 16
   const bx = Math.floor((W - bw) / 2), by = Math.floor((H - bh) / 2)
   m.rect = { bx, by, bw, bh }
   const C = { color: 'cyan' }
@@ -341,7 +341,7 @@ function drawModal() {
   putStr(bx + 2, by, ' settings ', { color: 'cyan', bold: true })
 
   const ix = bx + 2, rw = bw - 4
-  m.rowsY = [by + 2, by + 4, by + 6, by + 8, by + 12]
+  m.rowsY = [by + 2, by + 4, by + 6, by + 8, by + 10, by + 14]
 
   const uval = (m.editing && m.row === 0) ? m.edit + '█' : state.username
   modalField(ix, by + 2, rw, 'username', uval, m.row === 0)
@@ -361,8 +361,21 @@ function drawModal() {
   const thr = THRESHOLD_PRESETS[m.thresholdIdx]?.label || 'Normal (200)'
   modalField(ix, by + 8, rw, 'sensitivity', '‹ ' + thr + ' ›', m.row === 3)
 
-  putStr(ix + 1, by + 10, '↑↓ move · enter select · ‹ › adjust · esc close', { dim: true })
-  modalField(ix, by + 12, rw, '', '[ close ]', m.row === 4)
+  // Row 4: check for updates — status shown inline so the button doubles as
+  // a result line ("up to date" / "update vX available"). Sticky while there
+  // is a pending update; transient otherwise (auto-clears after 4s). Note: a
+  // network failure is indistinguishable from "no update" here because
+  // checkForUpdate() falls back to the cached value on error.
+  const csel = m.row === 4
+  let cval, cattr
+  if (m.checkStatus === 'checking')    { cval = '⟳ checking…';                                      cattr = { color: 'yellow' } }
+  else if (m.checkStatus === 'update') { cval = '! update v' + m.updateVer + ' available — press [U]'; cattr = { color: 'yellow', bold: true } }
+  else if (m.checkStatus === 'latest') { cval = '✓ you are up to date';                                cattr = { color: 'green' } }
+  else                                 { cval = '▶ check for updates';                               cattr = {} }
+  putStr(ix, by + 10, padEnd(' ' + cval, rw), csel ? { bgColor: 'cyan', color: 'black' } : cattr)
+
+  putStr(ix + 1, by + 12, '↑↓ move · enter select · ‹ › adjust · esc close', { dim: true })
+  modalField(ix, by + 14, rw, '', '[ close ]', m.row === 5)
 }
 
 function modalField(ix, y, rw, label, value, sel) {
@@ -551,8 +564,8 @@ function handleModalKey(name, data) {
     return
   }
   switch (name) {
-    case 'UP':    m.row = (m.row + 4) % 5; ui.dirty = true; break
-    case 'DOWN':  m.row = (m.row + 1) % 5; ui.dirty = true; break
+    case 'UP':    m.row = (m.row + 5) % 6; ui.dirty = true; break
+    case 'DOWN':  m.row = (m.row + 1) % 6; ui.dirty = true; break
     case 'LEFT':  if (m.row === 1) cycleDevice(-1); else if (m.row === 3) cycleThreshold(-1); break
     case 'RIGHT': if (m.row === 1) cycleDevice(1); else if (m.row === 3) cycleThreshold(1); break
     case 'ENTER': modalActivate(); break
@@ -704,11 +717,13 @@ function openSettings() {
   const devices = audioApi?.getInputDevices ? audioApi.getInputDevices() : [{ id: -1, name: 'default' }]
   const savedThreshold = config.get('vadThreshold', 200)
   const presetIdx = THRESHOLD_PRESETS.findIndex(p => p.value === savedThreshold)
-  ui.modal = { row: 0, editing: false, edit: '', devices, devIdx: 0, testing: false, testLevel: 0, testError: false, thresholdIdx: presetIdx >= 0 ? presetIdx : 1 }
+  ui.modal = { row: 0, editing: false, edit: '', devices, devIdx: 0, testing: false, testLevel: 0, testError: false, thresholdIdx: presetIdx >= 0 ? presetIdx : 1, checkStatus: null, updateVer: null, _checkTimer: null }
   ui.dirty = true
 }
 
 function closeSettings() {
+  const m = ui.modal
+  if (m?._checkTimer) clearTimeout(m._checkTimer)
   stopMicTest()
   ui.modal = null
   ui.dirty = true
@@ -720,7 +735,8 @@ function modalActivate() {
   else if (m.row === 1) cycleDevice(1)
   else if (m.row === 2) toggleMicTest()
   else if (m.row === 3) cycleThreshold(1)
-  else if (m.row === 4) closeSettings()
+  else if (m.row === 4) checkUpdateNow()
+  else if (m.row === 5) closeSettings()
 }
 
 function cycleDevice(dir) {
@@ -759,6 +775,31 @@ function stopMicTest() {
   if (m?._stop) { m._stop(); m._stop = null }
   if (m) { m.testing = false; m.testLevel = 0 }
   ui.dirty = true
+}
+
+// Manual update check from the settings modal. Bypasses the once-per-session
+// cache so each press re-fetches from GitHub. Surfaces the result inline on the
+// button row; if an update is found, also lights up the [U] shortcut in the
+// status bar so it can be installed without leaving settings first.
+async function checkUpdateNow() {
+  const m = ui.modal
+  if (!m) return
+  if (m.checkStatus === 'checking') return
+  if (m._checkTimer) { clearTimeout(m._checkTimer); m._checkTimer = null }
+  m.checkStatus = 'checking'; m.updateVer = null; ui.dirty = true
+  resetUpdateCache()
+  let ver
+  try { ver = await checkForUpdate() } catch { ver = null }
+  if (!ui.modal) return                       // closed while checking
+  if (ver) {
+    m.checkStatus = 'update'; m.updateVer = ver
+    updateAvailable = true; ui.dirty = true
+  } else {
+    m.checkStatus = 'latest'; ui.dirty = true
+    m._checkTimer = setTimeout(() => {
+      if (ui.modal) { ui.modal.checkStatus = null; ui.dirty = true }
+    }, 4000)
+  }
 }
 
 async function openChangelog() {

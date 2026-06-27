@@ -38,16 +38,30 @@ function compare(a, b) {
 export async function checkForUpdate() {
   if (_checked) return getPendingUpdate()
   _checked = true
+  return _doCheck()
+}
 
+export function getPendingUpdate() {
+  return config.get('updateAvailable', null)
+}
+
+// Forget that we already checked, so the next checkForUpdate() actually hits the
+// network again. Used by the manual "check for updates" button in settings.
+export function resetUpdateCache() {
+  _checked = false
+}
+
+// Runs a live network check and caches the result in conf. Separated from
+// checkForUpdate() so manual re-checks can bypass the once-per-session guard.
+async function _doCheck() {
   const current = getCurrentVersion()
   if (!current) return null
-
   try {
     const res = await fetch(API_URL, {
       headers: { 'User-Agent': 'yapper', 'Accept': 'application/vnd.github.v3+json' },
       signal: AbortSignal.timeout(5000),
     })
-    if (!res.ok) return null
+    if (!res.ok) return getPendingUpdate()
     const data = await res.json()
     const remotePkg = JSON.parse(Buffer.from(data.content, 'base64').toString('utf8'))
     const remote = parseVersion(remotePkg.version)
@@ -58,12 +72,8 @@ export async function checkForUpdate() {
     config.delete('updateAvailable')
     return null
   } catch {
-    return config.get('updateAvailable', null)
+    return getPendingUpdate()
   }
-}
-
-export function getPendingUpdate() {
-  return config.get('updateAvailable', null)
 }
 
 export function clearPendingUpdate() {

@@ -6,6 +6,22 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.1.28
+
+### Русский
+- В настройки (S) добавлена кнопка «проверить обновления». Нажатие заново
+  опрашивает GitHub в обход разового за запуск кэша и тут же показывает
+  результат в самой строке: «✓ актуальная версия», «! доступно обновление vX»
+  (заодно подсвечивает [U] в статус-баре) или «× не удалось проверить». Статус
+  «актуальная версия» авто-скрывается через 4 секунды.
+
+### English
+- Added a "check for updates" button to the settings dialog (S). Pressing it
+  re-queries GitHub, bypassing the once-per-session cache, and shows the result
+  inline on the row: "✓ you are up to date", "! update vX available" (also lights
+  up the [U] shortcut in the status bar), or "× check failed". The "up to date"
+  status auto-hides after 4 seconds.
+
 ## 0.1.27
 
 ### Русский
