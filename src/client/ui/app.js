@@ -924,7 +924,12 @@ async function runUpdate() {
   console.log('\n' + '─'.repeat(40))
   console.log('  yapper — updating to latest...\n')
 
-  const child = spawn('npm', ['install', '-g', 'https://github.com/sadad1213/yapper/archive/refs/heads/main.tar.gz'], {
+  // shell:true is required on Windows (npm is npm.cmd, and spawning .cmd needs a
+  // shell since the CVE-2024-27980 fix). Pass the command as one string rather
+  // than args+shell:true to avoid DEP0190 — the URL is a hardcoded constant, so
+  // there's nothing unescaped to inject.
+  const url = 'https://github.com/sadad1213/yapper/archive/refs/heads/main.tar.gz'
+  const child = spawn(`npm install -g ${url}`, {
     stdio: 'inherit',
     shell: true,
   })

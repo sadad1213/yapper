@@ -6,6 +6,26 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.6
+
+### Русский
+- Убран варнинг `DEP0190` (DeprecationWarning о `shell: true` с аргументами),
+  который выскакивал при обновлении через [U] и при сборке naudiodon в
+  `yapper setup`. Причина — массив аргументов вместе с `shell: true`. На Windows
+  `shell: true` обязателен (npm — это `npm.cmd`), поэтому команда теперь
+  передаётся одной строкой без отдельного массива аргументов; URL/аргументы —
+  жёстко зашитые константы, так что инъекций нет. На POSIX используется
+  `shell: false` с массивом — тоже без варнинга.
+
+### English
+- Removed the `DEP0190` warning (DeprecationWarning about `shell: true` with
+  args) that showed up during the [U] self-update and the naudiodon build in
+  `yapper setup`. It was caused by passing an args array together with
+  `shell: true`. On Windows `shell: true` is required (npm is `npm.cmd`), so the
+  command is now passed as a single string with no separate args array; the
+  URL/args are hardcoded constants, so nothing is injectable. On POSIX it uses
+  `shell: false` with an args array — also warning-free.
+
 ## 0.2.5
 
 ### Русский

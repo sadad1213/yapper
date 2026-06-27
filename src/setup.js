@@ -325,9 +325,16 @@ export async function runSetup({ force = false } = {}) {
       term.bold('yapper setup\n')
     } else {
       status('info', `Building in ${PKG_ROOT}`)
-      const { ok, log } = await runWithProgress('npm', ['install', 'naudiodon', '--build-from-source'], {
+      // On Windows npm is npm.cmd and needs shell:true; pass the command as one
+      // string (empty args) so we don't trip DEP0190. On POSIX, shell:false with
+      // an args array is fine and avoids the warning too.
+      const onWin = process.platform === 'win32'
+      const npmArgs = ['install', 'naudiodon', '--build-from-source']
+      const { ok, log } = await runWithProgress(
+        onWin ? `npm ${npmArgs.join(' ')}` : 'npm',
+        onWin ? [] : npmArgs, {
         title: 'Building naudiodon',
-        shell: process.platform === 'win32',
+        shell: onWin,
         milestones: [
           { pct: 5,  kw: 'gyp info'  },
           { pct: 25, kw: 'msbuild'   },
