@@ -7,6 +7,19 @@ const config = new Conf({ projectName: 'yapper' })
 const API_URL = 'https://api.github.com/repos/sadad1213/yapper/contents/package.json?ref=main'
 const CHANGELOG_URL = 'https://api.github.com/repos/sadad1213/yapper/contents/CHANGELOG.md?ref=main'
 
+// GitHub auth — 5000 req/h with token vs 60 without.
+// Priority: env GITHUB_TOKEN → conf githubToken → anonymous.
+function authHeaders() {
+  const token = process.env.GITHUB_TOKEN || config.get('githubToken')
+  const h = { 'User-Agent': 'yapper', 'Accept': 'application/vnd.github.v3+json' }
+  if (token) h.Authorization = `Bearer ${token}`
+  return h
+}
+
+export function setGithubToken(token) {
+  config.set('githubToken', token)
+}
+
 let _checked = false
 let _currentVersion = null
 
@@ -59,7 +72,7 @@ async function _doCheck(throwOnError = false) {
   if (!current) return null
   try {
     const res = await fetch(API_URL, {
-      headers: { 'User-Agent': 'yapper', 'Accept': 'application/vnd.github.v3+json' },
+      headers: authHeaders(),
       signal: AbortSignal.timeout(5000),
     })
     if (!res.ok) {
@@ -102,7 +115,7 @@ export async function fetchChangelog(version) {
   if (!want) return null
   try {
     const res = await fetch(CHANGELOG_URL, {
-      headers: { 'User-Agent': 'yapper', 'Accept': 'application/vnd.github.v3+json' },
+      headers: authHeaders(),
       signal: AbortSignal.timeout(5000),
     })
     if (!res.ok) return null
