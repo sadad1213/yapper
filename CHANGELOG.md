@@ -6,6 +6,22 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.1.23
+
+### Русский
+- Ввод ника в настройках и названия комнаты в prompt теперь ограничен по
+  длине (32 и 20 символов соответственно). В обоих полях показывается
+  счётчик `N/MAX`, который жёлтым загорается у предела; дальше печатать нельзя.
+  Раньше лимит был только серверный и скрытый — можно было ввести бесконечно
+  длинную строку, которую сервер молча обрезал.
+
+### English
+- The username (settings) and room name (prompt) inputs now have a length
+  limit (32 and 20 chars respectively). Both fields show an `N/MAX` counter that
+  turns yellow at the limit, after which you can't type any more. Previously the
+  limit was server-side and invisible — you could type an arbitrarily long
+  string that the server silently truncated.
+
 ## 0.1.22
 
 ### Русский

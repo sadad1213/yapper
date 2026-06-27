@@ -16,6 +16,8 @@ const require = createRequire(import.meta.url)
 const VERSION = require('../../../package.json').version
 
 const LEFT_W = 22            // inner width of the left (rooms) panel
+const MAX_USERNAME = 32       // matches the server-side slice(0, 32)
+const MAX_ROOMNAME = 20       // short enough to fit a sidebar row: `▸ <name> <count>` in LEFT_W
 
 const THRESHOLD_PRESETS = [
   { value: 100, label: 'Quiet (100)' },
@@ -343,6 +345,10 @@ function drawModal() {
 
   const uval = (m.editing && m.row === 0) ? m.edit + '█' : state.username
   modalField(ix, by + 2, rw, 'username', uval, m.row === 0)
+  if (m.editing && m.row === 0) {
+    const cnt = `${m.edit.length}/${MAX_USERNAME}`
+    putStr(ix + rw - cnt.length, by + 2, cnt, m.edit.length >= MAX_USERNAME ? { color: 'yellow', bold: true } : { dim: true })
+  }
 
   const dev = m.devices?.[m.devIdx]?.name || 'default'
   modalField(ix, by + 4, rw, 'microphone', '‹ ' + dev + ' ›', m.row === 1)
@@ -379,6 +385,10 @@ function drawPrompt() {
   putStr(bx, by + bh - 1, '╰' + '─'.repeat(bw - 2) + '╯', C)
   putStr(bx + 2, by, ' ' + p.title + ' ', { color: 'cyan', bold: true })
   putStr(bx + 2, by + 2, '> ' + p.value + '█', {})
+  if (p.max) {
+    const cnt = `${p.value.length}/${p.max}`
+    putStr(bx + bw - cnt.length - 2, by + 2, cnt, p.value.length >= p.max ? { color: 'yellow', bold: true } : { dim: true })
+  }
   putStr(bx + 2, by + bh - 1, ' enter ok · esc cancel ', { dim: true })
 }
 
@@ -520,7 +530,7 @@ function handlePromptKey(name, data) {
   if (name === 'ENTER')          { ui.prompt = null; p.onSubmit(p.value); ui.dirty = true }
   else if (name === 'ESCAPE')    { ui.prompt = null; ui.dirty = true }
   else if (name === 'BACKSPACE') { p.value = p.value.slice(0, -1); ui.dirty = true }
-  else if (data?.isCharacter)    { p.value += String.fromCodePoint(data.codepoint); ui.dirty = true }
+  else if (data?.isCharacter && p.value.length < (p.max ?? Infinity)) { p.value += String.fromCodePoint(data.codepoint); ui.dirty = true }
 }
 
 function handleVolumeKey(name) {
@@ -533,10 +543,10 @@ function handleVolumeKey(name) {
 function handleModalKey(name, data) {
   const m = ui.modal
   if (m.editing) {
-    if (name === 'ENTER')          { state.username = (m.edit.trim() || state.username).slice(0, 32); config.set('username', state.username); m.editing = false; handlers.onIdentify?.(state.username) }
+    if (name === 'ENTER')          { state.username = (m.edit.trim() || state.username).slice(0, MAX_USERNAME); config.set('username', state.username); m.editing = false; handlers.onIdentify?.(state.username) }
     else if (name === 'ESCAPE')    { m.editing = false }
     else if (name === 'BACKSPACE') { m.edit = m.edit.slice(0, -1) }
-    else if (data?.isCharacter && m.edit.length < 32) { m.edit += String.fromCodePoint(data.codepoint) }
+    else if (data?.isCharacter && m.edit.length < MAX_USERNAME) { m.edit += String.fromCodePoint(data.codepoint) }
     ui.dirty = true
     return
   }
@@ -674,6 +684,7 @@ function promptNewRoom() {
   ui.prompt = {
     title: 'new room',
     value: '',
+    max: MAX_ROOMNAME,
     onSubmit: (val) => {
       const name = val.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
       if (!name) return
