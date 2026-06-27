@@ -1,8 +1,6 @@
 import termkit from 'terminal-kit'
 import Conf from 'conf'
-import { readFileSync } from 'fs'
-import { fileURLToPath } from 'url'
-import { dirname, join } from 'path'
+import { createRequire } from 'module'
 import { getThreshold, setThreshold } from '../audio/vad.js'
 import { getUserVolume, setUserVolume } from '../audio/playback.js'
 import { checkForUpdate, clearPendingUpdate } from '../../auto-update.js'
@@ -10,9 +8,8 @@ import { checkForUpdate, clearPendingUpdate } from '../../auto-update.js'
 const term = termkit.terminal
 const config = new Conf({ projectName: 'yapper' })
 
-// Read version from package.json so status bar is always correct
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const VERSION = JSON.parse(readFileSync(join(__dirname, '..', '..', '..', 'package.json'), 'utf8')).version
+const require = createRequire(import.meta.url)
+const VERSION = require('../../package.json').version
 
 const LEFT_W = 22            // inner width of the left (rooms) panel
 
