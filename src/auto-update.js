@@ -4,7 +4,7 @@ import { dirname, join } from 'path'
 import Conf from 'conf'
 
 const config = new Conf({ projectName: 'yapper' })
-const RAW_URL = 'https://raw.githubusercontent.com/sadad1213/yapper/main/package.json'
+const API_URL = 'https://api.github.com/repos/sadad1213/yapper/contents/package.json?ref=main'
 
 let _checked = false
 let _currentVersion = null
@@ -42,12 +42,13 @@ export async function checkForUpdate() {
   if (!current) return null
 
   try {
-    const res = await fetch(RAW_URL, {
-      headers: { 'User-Agent': 'yapper' },
+    const res = await fetch(API_URL, {
+      headers: { 'User-Agent': 'yapper', 'Accept': 'application/vnd.github.v3+json' },
       signal: AbortSignal.timeout(5000),
     })
     if (!res.ok) return null
-    const remotePkg = await res.json()
+    const data = await res.json()
+    const remotePkg = JSON.parse(Buffer.from(data.content, 'base64').toString('utf8'))
     const remote = parseVersion(remotePkg.version)
     if (compare(remote, current) > 0) {
       config.set('updateAvailable', remote.raw)
