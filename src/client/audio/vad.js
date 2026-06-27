@@ -1,4 +1,4 @@
-const SILENCE_THRESHOLD = 400  // linear RMS below this is treated as silence
+const SILENCE_THRESHOLD = 200  // linear RMS below this is treated as silence (lower = more sensitive)
 
 export function rawRms(pcmBuffer) {
   let sumSq = 0
