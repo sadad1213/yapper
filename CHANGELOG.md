@@ -6,6 +6,18 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.1.22
+
+### Русский
+- Исправлен ASCII-скриншот в README: строка-подчёркивание справа была
+  короче на 3 символа, из-за чего правая рамка под заголовком комнаты
+  «уезжала» влево. Теперь все стенки ровные.
+
+### English
+- Fixed the ASCII screenshot in the README: the underline row on the right
+  was 3 columns short, making the right wall under the room header shift
+  left. All walls are now straight.
+
 ## 0.1.21
 
 ### Русский

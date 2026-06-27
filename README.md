@@ -7,7 +7,7 @@ driven TUI with rooms, a live mic meter, and a built-in audio setup wizard.
 ```
 ╭ yapper ──────────────────────────────────────────── ● 192.168.1.5:4747 ╮
 │ ROOMS                 │ general                               2 online │
-│ ───────────────────── │ ─────────────────────────────────────────── │
+│ ───────────────────── │ ────────────────────────────────────────────── │
 │ ▸ general           2 │ ◉ you (you)      speaking                      │
 │ ├─ me (you)           │ ○ alice          idle                          │
 │ └─ alice              │                                                │
@@ -18,7 +18,7 @@ driven TUI with rooms, a live mic meter, and a built-in audio setup wizard.
 │ ───────────────────── │ your mic   ████████░░░░░░                      │
 │ + new room            │                                                │
 ├───────────────────────┴────────────────────────────────────────────────┤
-│[M] mute  [N] new room  [S] settings  [C] changelog  [Q] quit    v0.1.21│
+│[M] mute  [N] new room  [S] settings  [C] changelog  [Q] quit    v0.1.22│
 ╰────────────────────────────────────────────────────────────────────────╯
 ```
 
