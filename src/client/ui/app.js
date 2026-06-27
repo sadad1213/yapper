@@ -325,7 +325,7 @@ function handlePromptKey(name, data) {
 function handleModalKey(name, data) {
   const m = ui.modal
   if (m.editing) {
-    if (name === 'ENTER')          { state.username = (m.edit.trim() || state.username).slice(0, 32); config.set('username', state.username); m.editing = false }
+    if (name === 'ENTER')          { state.username = (m.edit.trim() || state.username).slice(0, 32); config.set('username', state.username); m.editing = false; handlers.onIdentify?.(state.username) }
     else if (name === 'ESCAPE')    { m.editing = false }
     else if (name === 'BACKSPACE') { m.edit = m.edit.slice(0, -1) }
     else if (data?.isCharacter && m.edit.length < 32) { m.edit += String.fromCodePoint(data.codepoint) }

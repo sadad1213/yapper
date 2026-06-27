@@ -35,7 +35,7 @@ function handleSignal(ws, msg) {
 
   if (msg.type === 'identify') {
     client.username = String(msg.username || client.username).slice(0, 32)
-    send(ws, { type: 'rooms', list: roomList() })
+    broadcast({ type: 'rooms', list: roomList() })
   } else if (msg.type === 'join') {
     const name = String(msg.room).slice(0, 64)
     if (!rooms.has(name)) addRoom(name)

@@ -116,5 +116,6 @@ export function wireHandlers() {
     send({ type: 'join', room })
   }
   handlers.onMute = (muted) => send({ type: 'mute', muted })
+  handlers.onIdentify = (username) => send({ type: 'identify', username })
   handlers.onDisconnect = disconnect
 }
