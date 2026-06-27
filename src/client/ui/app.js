@@ -1,5 +1,8 @@
 import termkit from 'terminal-kit'
 import Conf from 'conf'
+import { readFileSync } from 'fs'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
 import { getThreshold, setThreshold } from '../audio/vad.js'
 import { getUserVolume, setUserVolume } from '../audio/playback.js'
 import { checkForUpdate, clearPendingUpdate } from '../../auto-update.js'
@@ -7,7 +10,10 @@ import { checkForUpdate, clearPendingUpdate } from '../../auto-update.js'
 const term = termkit.terminal
 const config = new Conf({ projectName: 'yapper' })
 
-const VERSION = '0.1.0'
+// Read version from package.json so status bar is always correct
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const VERSION = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8')).version
+
 const LEFT_W = 22            // inner width of the left (rooms) panel
 
 const THRESHOLD_PRESETS = [
@@ -276,6 +282,11 @@ function drawStatus() {
   seg('[S] settings', openSettings)
   if (updateAvailable) seg('[U] update!', runUpdate, { color: 'yellow', bold: true })
   seg('[Q] quit', quit)
+
+  // Version in the bottom-right corner
+  const { W } = L()
+  const ver = `v${VERSION}`
+  putStr(W - ver.length - 2, statusRow, ver, { dim: true })
 }
 
 // ─── Overlays ────────────────────────────────────────────────────────────────
