@@ -1,123 +1,151 @@
-import { spawn, execSync } from 'child_process'
+import { spawn, execSync, spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
+import { homedir } from 'os'
+import { mkdirSync, createWriteStream, existsSync, readdirSync, unlinkSync } from 'fs'
 import termkit from 'terminal-kit'
 
 const term = termkit.terminal
-const __filename = fileURLToPath(import.meta.url)
-const __dirname  = dirname(__filename)
-const PKG_ROOT   = join(__dirname, '..')   // src/setup.js → yapper/
+const __dirname  = dirname(fileURLToPath(import.meta.url))
+const PKG_ROOT   = join(__dirname, '..')
+const TOOLS_DIR  = join(homedir(), '.yapper', 'tools')
 
-// ─── Utilities ────────────────────────────────────────────────────────────────
+const SOX_VER    = '14.4.2'
+const SOX_URL    = `https://downloads.sourceforge.net/project/sox/sox/${SOX_VER}/sox-${SOX_VER}-win32.zip`
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function hasCmd(cmd) {
-  const check = process.platform === 'win32' ? `where "${cmd}"` : `which "${cmd}"`
-  try { execSync(check, { stdio: 'ignore' }); return true } catch { return false }
+  try { execSync(`where "${cmd}"`, { stdio: 'ignore' }); return true } catch { return false }
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 function header() {
   term.clear()
-  term.moveTo(1, 1)
   term.bold.cyan(' yapper — Audio Setup\n')
-  term.dim(' ' + '─'.repeat((process.stdout.columns || 70) - 2) + '\n\n')
+  term.dim(' ' + '─'.repeat(Math.max(40, (process.stdout.columns || 70) - 2)) + '\n\n')
 }
 
 function status(icon, label, detail = '') {
-  const icons = { ok: term.bold.green, warn: term.bold.yellow, err: term.bold.red, info: term.bold.cyan }
-  const fn = icons[icon] ?? term.dim
-  fn(` ${icon === 'ok' ? '✓' : icon === 'err' ? '✗' : icon === 'warn' ? '!' : '→'}  `)
+  const sym = { ok: '✓', err: '✗', warn: '!', info: '→' }[icon] ?? '·'
+  const col = { ok: term.bold.green, err: term.bold.red, warn: term.bold.yellow, info: term.bold.cyan }[icon] ?? term
+  col(` ${sym}  `)
   term(label)
   if (detail) term.dim(`  ${detail}`)
   term('\n')
 }
 
-// ─── Progress runner ──────────────────────────────────────────────────────────
-
-// milestones: [{pct: 0-100, keyword: 'text in output to trigger jump'}]
-async function runWithProgress(cmd, args, { cwd, title, milestones, shell = false } = {}) {
+async function waitKey(msg = ' Press any key to continue...') {
+  term.dim(msg)
+  term.grabInput()
+  await new Promise(resolve => term.once('key', resolve))
+  term.grabInput(false)
   term('\n')
-  const bar = term.progressBar({
-    width: Math.min(process.stdout.columns - 6 || 60, 60),
-    title,
-    percent: true,
-    eta: false,
-    titleStyle: term.bold,
-    barStyle: term.cyan,
-    barBracketStyle: term.dim,
-    percentStyle: term.bold,
-  })
+}
 
-  let currentPct = 0
-  let targetPct  = 0
-  let statusLine = ''
-  let done = false
+// ─── Progress bar for child-process installs ──────────────────────────────────
 
-  // Smooth animation: creep currentPct toward targetPct
-  const tick = setInterval(() => {
-    if (done) return
-    if (currentPct < targetPct) {
-      currentPct = Math.min(currentPct + 1, targetPct)
-      bar.update({ progress: currentPct / 100 })
-    }
-  }, 80)
+function runWithProgress(cmd, args, { title, milestones = [], shell = false, cwd } = {}) {
+  return new Promise((resolve) => {
+    term('\n')
+    const barW = Math.min((process.stdout.columns || 72) - 8, 56)
+    const bar  = term.progressBar({ width: barW, title, percent: true, eta: false,
+                                    titleStyle: term.bold, barStyle: term.cyan, barBracketStyle: term.dim })
 
-  // Bump target when a milestone keyword appears in output
-  function checkLine(line) {
-    for (const { pct, keyword } of milestones) {
-      if (keyword && line.toLowerCase().includes(keyword.toLowerCase())) {
-        if (pct > targetPct) { targetPct = pct; bar.update({ progress: currentPct / 100 }) }
+    let cur = 0, target = milestones[0]?.pct ?? 5, done = false
+    const tick = setInterval(() => {
+      if (!done && cur < target) { cur = Math.min(cur + 1, target); bar.update({ progress: cur / 100 }) }
+    }, 80)
+
+    const proc = spawn(cmd, args, { cwd: cwd ?? PKG_ROOT, stdio: ['ignore', 'pipe', 'pipe'], shell })
+    const lines = []
+
+    const onData = (d) => {
+      for (const line of d.toString().split('\n')) {
+        const l = line.trim()
+        if (!l) continue
+        lines.push(l)
+        for (const { pct, kw } of milestones) {
+          if (kw && l.toLowerCase().includes(kw) && pct > target) { target = pct }
+        }
       }
     }
-  }
-
-  return new Promise((resolve) => {
-    const proc = spawn(cmd, args, {
-      cwd: cwd ?? PKG_ROOT,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell,
-    })
-
-    const onData = (d) => d.toString().split('\n').forEach(l => l.trim() && checkLine(l))
     proc.stdout.on('data', onData)
     proc.stderr.on('data', onData)
 
     proc.on('close', async (code) => {
-      done = true
-      clearInterval(tick)
-      currentPct = code === 0 ? 100 : currentPct
-      bar.update({ progress: currentPct / 100 })
-      await sleep(200)
-      bar.stop()
-      resolve(code === 0)
-    })
-
-    proc.on('error', async () => {
       done = true; clearInterval(tick)
-      bar.update({ progress: 0 }); await sleep(100); bar.stop()
-      resolve(false)
+      bar.update({ progress: code === 0 ? 1 : cur / 100 })
+      await sleep(150); bar.stop()
+      resolve({ ok: code === 0, log: lines.join('\n') })
     })
-
-    // Kickstart first milestone
-    targetPct = milestones[0]?.pct ?? 5
+    proc.on('error', async () => {
+      done = true; clearInterval(tick); bar.stop()
+      resolve({ ok: false, log: '' })
+    })
   })
 }
 
-// ─── Install methods ──────────────────────────────────────────────────────────
+// ─── Progress bar for HTTP download ──────────────────────────────────────────
+
+async function downloadWithProgress(url, destPath, title) {
+  term('\n')
+  const barW = Math.min((process.stdout.columns || 72) - 8, 56)
+  const bar  = term.progressBar({ width: barW, title, percent: true, eta: true,
+                                  titleStyle: term.bold, barStyle: term.green, barBracketStyle: term.dim })
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': `yapper/${SOX_VER}` } })
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`)
+
+    const total   = parseInt(res.headers.get('content-length') || '0', 10)
+    let received  = 0
+    const stream  = createWriteStream(destPath)
+
+    for await (const chunk of res.body) {
+      received += chunk.length
+      stream.write(chunk)
+      bar.update({ progress: total ? received / total : undefined })
+    }
+
+    await new Promise((ok, fail) => { stream.end(); stream.on('finish', ok); stream.on('error', fail) })
+    bar.update({ progress: 1 })
+    await sleep(150); bar.stop()
+    return true
+  } catch (err) {
+    bar.stop()
+    status('err', `Download failed: ${err.message}`)
+    return false
+  }
+}
+
+// ─── SoX install methods ──────────────────────────────────────────────────────
 
 async function installSoxWinget() {
+  // Correct winget package ID (was incorrectly 'SoX.SoX')
   return runWithProgress('winget', [
-    'install', '--id', 'SoX.SoX',
-    '--accept-source-agreements', '--accept-package-agreements', '-h',
+    'install', '--id', 'ChrisBagwell.SoX', '--scope', 'user',
+    '--accept-source-agreements', '--accept-package-agreements',
   ], {
     title: 'Installing SoX via winget',
     milestones: [
-      { pct: 5,  keyword: 'found'       },
-      { pct: 20, keyword: 'download'    },
-      { pct: 55, keyword: 'verif'       },
-      { pct: 75, keyword: 'starting'    },
-      { pct: 90, keyword: 'successfully'},
+      { pct: 10, kw: 'found'        },
+      { pct: 30, kw: 'download'     },
+      { pct: 60, kw: 'verif'        },
+      { pct: 80, kw: 'install'      },
+      { pct: 92, kw: 'successfully' },
+    ],
+  })
+}
+
+async function installSoxScoop() {
+  return runWithProgress('scoop', ['install', 'sox'], {
+    title: 'Installing SoX via Scoop',
+    milestones: [
+      { pct: 10, kw: 'installing' },
+      { pct: 40, kw: 'download'   },
+      { pct: 80, kw: 'linking'    },
+      { pct: 92, kw: 'installed'  },
     ],
   })
 }
@@ -126,33 +154,63 @@ async function installSoxChoco() {
   return runWithProgress('choco', ['install', 'sox', '-y', '--no-progress'], {
     title: 'Installing SoX via Chocolatey',
     milestones: [
-      { pct: 5,  keyword: 'chocolatey'  },
-      { pct: 25, keyword: 'download'    },
-      { pct: 60, keyword: 'installing'  },
-      { pct: 90, keyword: 'installed'   },
+      { pct: 10, kw: 'chocolatey' },
+      { pct: 35, kw: 'download'   },
+      { pct: 70, kw: 'installing' },
+      { pct: 92, kw: 'installed'  },
     ],
   })
 }
 
-async function installNaudiodon() {
-  return runWithProgress('npm', ['install', 'naudiodon', '--build-from-source'], {
-    title: 'Building naudiodon (native audio)',
-    milestones: [
-      { pct: 5,  keyword: 'npm warn'     },
-      { pct: 15, keyword: 'gyp info'     },
-      { pct: 30, keyword: 'msbuild'      },
-      { pct: 50, keyword: 'cl.exe'       },
-      { pct: 70, keyword: 'link.exe'     },
-      { pct: 85, keyword: 'node_modules' },
-      { pct: 92, keyword: 'added'        },
-    ],
-    shell: process.platform === 'win32',
-  })
+async function downloadSoxPortable() {
+  mkdirSync(TOOLS_DIR, { recursive: true })
+
+  const zipPath  = join(TOOLS_DIR, 'sox.zip')
+  const soxDir   = join(TOOLS_DIR, `sox-${SOX_VER}`)
+
+  status('info', `Downloading SoX ${SOX_VER} portable...`)
+  const ok = await downloadWithProgress(SOX_URL, zipPath, `Downloading sox-${SOX_VER}-win32.zip`)
+  if (!ok) return { ok: false, reason: 'Download failed' }
+
+  // Extract
+  status('info', 'Extracting...')
+  try {
+    execSync(
+      `powershell -NoProfile -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${TOOLS_DIR}' -Force"`,
+      { stdio: 'ignore' }
+    )
+    try { unlinkSync(zipPath) } catch {}
+  } catch {
+    return { ok: false, reason: 'Extraction failed (PowerShell Expand-Archive)' }
+  }
+
+  // Find sox.exe — it may be in sox-14.4.2/ or sox-14.4.2-win32/
+  let foundDir = null
+  if (existsSync(soxDir) && existsSync(join(soxDir, 'sox.exe'))) {
+    foundDir = soxDir
+  } else {
+    for (const entry of readdirSync(TOOLS_DIR)) {
+      const candidate = join(TOOLS_DIR, entry)
+      if (existsSync(join(candidate, 'sox.exe'))) { foundDir = candidate; break }
+    }
+  }
+
+  if (!foundDir) return { ok: false, reason: 'sox.exe not found after extraction' }
+
+  // Add to current process PATH immediately
+  process.env.PATH = `${foundDir};${process.env.PATH}`
+
+  // Persist to user PATH for future sessions
+  try {
+    execSync(`setx PATH "${foundDir};%PATH%"`, { stdio: 'ignore' })
+  } catch {}
+
+  return { ok: true }
 }
 
-// ─── Check helpers ────────────────────────────────────────────────────────────
+// ─── Check audio backends ─────────────────────────────────────────────────────
 
-async function hasSox() { return hasCmd('sox') }
+function hasSoxCmd() { return hasCmd('sox') }
 async function hasNaudiodon() {
   try { await import('naudiodon'); return true } catch { return false }
 }
@@ -160,47 +218,43 @@ async function hasNaudiodon() {
 // ─── Main setup flow ──────────────────────────────────────────────────────────
 
 export async function runSetup({ force = false } = {}) {
-  const soxOk    = await hasSox()
-  const ndOk     = await hasNaudiodon()
-  const audioOk  = soxOk || ndOk
+  const soxOk = hasSoxCmd()
+  const ndOk  = await hasNaudiodon()
 
-  if (audioOk && !force) {
+  if ((soxOk || ndOk) && !force) {
     status('ok', 'Audio backend already available', ndOk ? 'naudiodon' : 'SoX')
     return true
   }
 
   header()
   term.bold(' Checking audio backends...\n\n')
-  status(ndOk  ? 'ok'  : 'warn', 'naudiodon (native)',   ndOk  ? 'available' : 'not found')
-  status(soxOk ? 'ok'  : 'warn', 'SoX',                  soxOk ? 'available' : 'not found')
+  status(ndOk  ? 'ok' : 'warn', 'naudiodon (native)',  ndOk  ? 'available' : 'not found')
+  status(soxOk ? 'ok' : 'warn', 'SoX',                 soxOk ? 'available' : 'not found')
   term('\n')
 
-  if (!force && audioOk) { status('ok', 'Audio is ready — no setup needed'); return true }
+  if (!force && (soxOk || ndOk)) {
+    status('ok', 'Audio is ready'); return true
+  }
 
-  // ── Option menu ──────────────────────────────────────────────────────────
+  // Menu
   term.bold(' Choose installation method:\n\n')
   term.cyan('  [1]  SoX ')
-  term.dim('(recommended — simple download, no compilation)\n')
-
+  term.dim('(recommended — auto-download, no compilation)\n')
   term.cyan('  [2]  naudiodon ')
-  term.dim('(better quality — requires Visual Studio Build Tools)\n')
-
+  term.dim('(better quality — needs Visual Studio Build Tools)\n')
   term.dim('  [3]  Skip — run without audio\n\n')
   term('  Choice: ')
 
   term.grabInput()
   const choice = await new Promise(resolve => {
-    function onKey(name) {
-      if (['1','2','3','CTRL_C','q'].includes(name)) {
-        term.removeListener('key', onKey)
-        resolve(name)
-      }
+    const onKey = (name) => {
+      if (['1','2','3','CTRL_C','q'].includes(name)) { term.removeListener('key', onKey); resolve(name) }
     }
     term.on('key', onKey)
   })
   term.grabInput(false)
 
-  if (choice === 'CTRL_C' || choice === 'q' || choice === '3') {
+  if (['3', 'CTRL_C', 'q'].includes(choice)) {
     term.dim('\n Skipping audio setup.\n\n')
     return false
   }
@@ -208,74 +262,83 @@ export async function runSetup({ force = false } = {}) {
   term('\n')
   header()
 
-  // ── SoX install ──────────────────────────────────────────────────────────
+  // ── SoX ───────────────────────────────────────────────────────────────────
   if (choice === '1') {
-    let ok = false
+    let result = { ok: false, reason: '' }
 
     if (hasCmd('winget')) {
-      status('info', 'Found winget — using Windows Package Manager')
-      ok = await installSoxWinget()
-    } else if (hasCmd('choco')) {
-      status('info', 'Found Chocolatey — using choco install')
-      ok = await installSoxChoco()
-    } else {
-      status('err', 'Neither winget nor chocolatey found')
-      term('\n  Install SoX manually:\n')
-      term('  https://sourceforge.net/projects/sox/files/sox/\n\n')
-      term('  Then re-run: ')
-      term.bold('yapper setup\n\n')
-      await waitKey()
-      return false
+      status('info', 'Trying winget...')
+      result = await installSoxWinget()
+      if (!result.ok) status('warn', result.reason ?? 'winget failed, trying next method...')
+    }
+
+    if (!result.ok && hasCmd('scoop')) {
+      status('info', 'Trying Scoop...')
+      result = await installSoxScoop()
+      if (!result.ok) status('warn', 'Scoop failed, trying next method...')
+    }
+
+    if (!result.ok && hasCmd('choco')) {
+      status('info', 'Trying Chocolatey...')
+      result = await installSoxChoco()
+      if (!result.ok) status('warn', 'Chocolatey failed, trying direct download...')
+    }
+
+    if (!result.ok) {
+      status('info', 'Downloading portable SoX directly...')
+      result = await downloadSoxPortable()
     }
 
     term('\n')
-    if (ok) {
-      status('ok', 'SoX installed! Verifying...')
-      // Refresh PATH so sox is available in this process
-      if (process.platform === 'win32') {
+    if (result.ok) {
+      // Refresh PATH from environment (winget/scoop may have added to system PATH)
+      if (process.platform === 'win32' && !hasSoxCmd()) {
         try {
-          const newPath = execSync('cmd /c echo %PATH%', { encoding: 'utf8' }).trim()
-          process.env.PATH = newPath
+          const p = execSync('cmd /c echo %PATH%', { encoding: 'utf8' }).trim()
+          process.env.PATH = p
         } catch {}
       }
-      const verified = hasCmd('sox')
-      if (verified) {
-        status('ok', 'SoX found in PATH — audio is ready')
+      if (hasSoxCmd()) {
+        status('ok', 'SoX is ready — audio enabled!')
       } else {
         status('warn', 'SoX installed but not yet in PATH')
-        term.dim('   Restart your terminal and run yapper again.\n')
+        term.dim('  Restart your terminal and run yapper again.\n')
       }
     } else {
-      status('err', 'SoX installation failed')
-      term('\n  Try installing manually: ')
-      term.bold('winget install SoX.SoX\n')
+      status('err', `Failed: ${result.reason ?? 'all methods exhausted'}`)
+      term('\n  Manual options:\n')
+      term('    winget: ')
+      term.bold('winget install ChrisBagwell.SoX\n')
+      term('    direct: ')
+      term.bold(`https://sourceforge.net/projects/sox/files/sox/${SOX_VER}/\n`)
     }
   }
 
-  // ── naudiodon install ────────────────────────────────────────────────────
+  // ── naudiodon ─────────────────────────────────────────────────────────────
   if (choice === '2') {
-    status('info', `Installing in: ${PKG_ROOT}`)
-
-    const hasMsBuild = process.platform === 'win32'
-      ? (() => { try { execSync('where msbuild', { stdio: 'ignore' }); return true } catch { return false } })()
-      : true  // On Linux/Mac, g++ usually available
-
+    const hasMsBuild = hasCmd('msbuild')
     if (process.platform === 'win32' && !hasMsBuild) {
-      status('warn', 'Visual Studio Build Tools not found')
-      term('\n  naudiodon needs C++ compiler. Install:\n')
-      term('  https://visualstudio.microsoft.com/downloads/ → "Build Tools for Visual Studio"\n')
-      term('  Select: C++ build tools workload, then re-run: ')
-      term.bold('yapper setup\n\n')
-      await waitKey()
-      return false
-    }
-
-    const ok = await installNaudiodon()
-    term('\n')
-    if (ok) {
-      status('ok', 'naudiodon built successfully — audio is ready')
+      status('warn', 'Visual Studio Build Tools not detected')
+      term('\n  Install from: https://visualstudio.microsoft.com/downloads/\n')
+      term('  Choose "Build Tools for Visual Studio" → C++ build tools workload.\n')
+      term('  Then restart terminal and run ')
+      term.bold('yapper setup\n')
     } else {
-      status('err', 'naudiodon build failed — try SoX instead (option 1)')
+      status('info', `Building in ${PKG_ROOT}`)
+      const { ok, log } = await runWithProgress('npm', ['install', 'naudiodon', '--build-from-source'], {
+        title: 'Building naudiodon',
+        shell: process.platform === 'win32',
+        milestones: [
+          { pct: 5,  kw: 'gyp info'  },
+          { pct: 25, kw: 'msbuild'   },
+          { pct: 50, kw: 'cl.exe'    },
+          { pct: 72, kw: 'link.exe'  },
+          { pct: 88, kw: 'added'     },
+        ],
+      })
+      term('\n')
+      if (ok) status('ok', 'naudiodon built — audio enabled!')
+      else    status('err', 'Build failed — try SoX (option 1) as an easier alternative')
     }
   }
 
@@ -284,15 +347,6 @@ export async function runSetup({ force = false } = {}) {
   return true
 }
 
-async function waitKey() {
-  term.dim(' Press any key to continue...')
-  term.grabInput()
-  await new Promise(resolve => term.once('key', resolve))
-  term.grabInput(false)
-  term('\n')
-}
-
-// ─── Called directly: yapper setup ───────────────────────────────────────────
 export async function runSetupCLI() {
   await runSetup({ force: true })
   process.exit(0)
