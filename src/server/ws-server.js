@@ -1,8 +1,7 @@
 import { WebSocketServer } from 'ws'
-import Bonjour from 'bonjour-service'
 import { rooms, addRoom } from './rooms.js'
 
-const PORT = 4747
+export const DEFAULT_PORT = 4747
 let nextId = 1
 
 // Map<ws, { id, username, room: string|null, muted: bool }>
@@ -61,7 +60,7 @@ function handleAudio(ws, data) {
   const sender = clients.get(ws)
   if (!sender || !sender.room) return
 
-  // Prepend 1-byte userId so receiver knows who's talking
+  // Prepend 1-byte userId so the receiver knows who is talking
   const frame = Buffer.allocUnsafe(1 + data.length)
   frame.writeUInt8(sender.id & 0xff, 0)
   data.copy(frame, 1)
@@ -73,34 +72,34 @@ function handleAudio(ws, data) {
   }
 }
 
-export function startWsServer() {
-  const wss = new WebSocketServer({ port: PORT })
-  const bonjour = new Bonjour()
+// Resolves once the server is listening; rejects on bind error (e.g. EADDRINUSE),
+// which the caller uses to detect that someone else already won the host slot.
+export function startWsServer(port = DEFAULT_PORT) {
+  return new Promise((resolve, reject) => {
+    const wss = new WebSocketServer({ port })
 
-  bonjour.publish({ name: 'yapper', type: 'yapper', port: PORT })
-  console.log(`yapper server listening on ws://0.0.0.0:${PORT}`)
-  console.log('Broadcasting on local network via mDNS...')
+    wss.on('error', reject)
+    wss.on('listening', () => resolve(wss))
 
-  wss.on('connection', (ws) => {
-    const id = nextId > 255 ? (nextId = 1) && nextId++ : nextId++
-    const client = { id, username: `user${id}`, room: null, muted: false }
-    clients.set(ws, client)
+    wss.on('connection', (ws) => {
+      const id = nextId > 255 ? (nextId = 1) : nextId++
+      const client = { id, username: `user${id}`, room: null, muted: false }
+      clients.set(ws, client)
 
-    ws.on('message', (data, isBinary) => {
-      if (isBinary) handleAudio(ws, data)
-      else {
-        try { handleSignal(ws, JSON.parse(data.toString())) } catch {}
-      }
+      ws.on('message', (data, isBinary) => {
+        if (isBinary) handleAudio(ws, data)
+        else {
+          try { handleSignal(ws, JSON.parse(data.toString())) } catch {}
+        }
+      })
+
+      ws.on('close', () => {
+        clients.delete(ws)
+        broadcast({ type: 'rooms', list: roomList() })
+      })
+
+      send(ws, { type: 'identified', userId: id })
+      send(ws, { type: 'rooms', list: roomList() })
     })
-
-    ws.on('close', () => {
-      clients.delete(ws)
-      broadcast({ type: 'rooms', list: roomList() })
-    })
-
-    send(ws, { type: 'identified', userId: id })
-    send(ws, { type: 'rooms', list: roomList() })
   })
-
-  return wss
 }

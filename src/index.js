@@ -19,10 +19,14 @@ if (values.help) {
 yapper — CLI voice chat
 
 Usage:
-  yapper                Auto-discover server on LAN and start client
-  yapper server         Start a server on the local network
-  yapper connect <url>  Connect to a specific server (ws://host:port)
+  yapper                Join the LAN: find a host automatically, or become one
+  yapper connect <ip>   Connect to a specific host (ip or ws://host:port)
+  yapper server         Run a dedicated headless host (no UI)
   yapper setup          Configure audio backend (SoX or naudiodon)
+
+No server to start manually — just run "yapper" on each machine. The first
+one becomes the host; everyone else discovers it and shares its rooms. Over
+Hamachi/Radmin, if discovery is blocked use "yapper connect <peer-ip>".
 
 Options:
   -v, --version         Show version
@@ -49,8 +53,9 @@ else if (command === 'setup') {
 // ── Client mode ───────────────────────────────────────────────────────────────
 else {
   const { startUI, handlers, registerAudio, setSelfLevel } = await import('./client/ui/app.js')
-  const { connect, wireHandlers, setAudioQueue, sendAudio } = await import('./client/network/ws-client.js')
-  const { discoverServer }  = await import('./client/network/discovery.js')
+  const { connectManaged, wireHandlers, setAudioQueue, sendAudio } = await import('./client/network/ws-client.js')
+  const { discover, startResponder } = await import('./net/discovery.js')
+  const { startWsServer, DEFAULT_PORT } = await import('./server/ws-server.js')
   const audio = await import('./client/audio/index.js')
   const { startCapture, stopCapture, getInputDevices, setInputDevice, startMicTest, audioEvents } = audio
 
@@ -97,16 +102,33 @@ else {
     }
   }
 
-  // 6. Connect to server
-  const targetUrl = (command === 'connect' && positionals[1]) ? positionals[1] : null
+  // 6. Connect — serverless: discover a host on the LAN, or become the host.
+  let explicitUrl = null
+  if (command === 'connect' && positionals[1]) {
+    const arg = positionals[1]
+    explicitUrl = arg.startsWith('ws://') ? arg : `ws://${arg}:${DEFAULT_PORT}`
+  }
 
-  async function tryConnect() {
+  let hosting = false
+  async function resolveUrl() {
+    if (explicitUrl) return explicitUrl
+    if (hosting) return `ws://127.0.0.1:${DEFAULT_PORT}`
+
+    const found = await discover(1500)
+    if (found) return `ws://${found.host}:${found.port}`
+
+    // Nobody is hosting — try to become the host.
     try {
-      const url = targetUrl ?? await discoverServer()
-      connect(url)
+      await startWsServer(DEFAULT_PORT)
+      startResponder(DEFAULT_PORT)
+      hosting = true
+      return `ws://127.0.0.1:${DEFAULT_PORT}`
     } catch {
-      setTimeout(tryConnect, 5000)
+      // Lost the race (port taken) — someone else just became host; find them.
+      const again = await discover(1500)
+      return again ? `ws://${again.host}:${again.port}` : null
     }
   }
-  tryConnect()
+
+  connectManaged(resolveUrl)
 }

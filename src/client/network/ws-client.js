@@ -3,15 +3,39 @@ import { state, handlers, updateState, markTalking } from '../ui/app.js'
 
 let ws = null
 let reconnectTimer = null
-let audioQueueFn = null   // set to playback.queueFrame once audio is ready
+let audioQueueFn = null     // set to playback.queueFrame once audio is ready
+let resolveUrl = null       // async () => 'ws://host:port' | null  (re-runs discovery/host election)
+let stopped = false
 
 export function setAudioQueue(fn) {
   audioQueueFn = fn
 }
 
-export function connect(url) {
-  if (ws) ws.terminate()
+// Connect using a resolver so that, after a drop, we re-discover (or become)
+// a host rather than hammering a dead address.
+export function connectManaged(resolver) {
+  resolveUrl = resolver
+  stopped = false
+  attempt()
+}
 
+async function attempt() {
+  if (stopped) return
+  let url
+  try { url = await resolveUrl() } catch { url = null }
+  if (stopped) return
+  if (!url) { scheduleRetry(); return }
+  openSocket(url)
+}
+
+function scheduleRetry() {
+  clearTimeout(reconnectTimer)
+  // jitter avoids every orphaned client trying to become host at the same instant
+  reconnectTimer = setTimeout(attempt, 600 + Math.random() * 1200)
+}
+
+function openSocket(url) {
+  if (ws) { try { ws.terminate() } catch {} }
   ws = new WebSocket(url)
 
   ws.on('open', () => {
@@ -37,7 +61,7 @@ export function connect(url) {
 
   ws.on('close', () => {
     updateState({ connected: false, serverAddr: null, rooms: [], currentRoom: null })
-    reconnectTimer = setTimeout(() => connect(url), 3000)
+    scheduleRetry()           // re-resolve: find the new host or become one
   })
 
   ws.on('error', () => {})
@@ -78,8 +102,9 @@ export function sendAudio(frame) {
 }
 
 export function disconnect() {
+  stopped = true
   clearTimeout(reconnectTimer)
-  if (ws) { ws.terminate(); ws = null }
+  if (ws) { try { ws.terminate() } catch {}; ws = null }
 }
 
 // Wire up UI action handlers
