@@ -196,10 +196,12 @@ function drawRooms() {
   }
 
   let y = firstRow
+  const newRoomIdx = ui.roomItems.length - 1   // last item is always the newRoom footer
   for (let i = 0; i < ui.roomItems.length; i++) {
-    if (y > lastRow) break
+    if (y > lastRow - 2) break                 // reserve lastRow-1 (divider) and lastRow (footer)
     const item = ui.roomItems[i]
-    const sel = i === ui.selectedLine && !ui.modal && !ui.prompt && !ui.volumePopup
+    if (item.type === 'newRoom') continue      // footer is drawn separately at the bottom
+    const sel = i === ui.selectedLine && !ui.modal && !ui.prompt && !ui.volumePopup && !ui.changelog
 
     if (item.type === 'room') {
       const cur = item.name === state.currentRoom
@@ -216,11 +218,16 @@ function drawRooms() {
       const line = branch + item.username
       const attr = sel ? { bgColor: 'cyan', color: 'black' } : { dim: true }
       putStr(1, y, padEnd(line, LEFT_W), attr)
-    } else if (item.type === 'newRoom') {
-      putStr(1, y, padEnd('+ new room', LEFT_W), sel ? { bgColor: 'cyan', color: 'black' } : { dim: true })
     }
     y++
   }
+
+  // Footer: [+ new room] pinned to the very bottom of the sidebar, with a
+  // thin divider above it so it reads as an action, not just another room.
+  putStr(1, lastRow - 1, '─'.repeat(LEFT_W), { dim: true })
+  const sel = newRoomIdx === ui.selectedLine && !ui.modal && !ui.prompt && !ui.volumePopup && !ui.changelog
+  putStr(1, lastRow, padEnd('+ new room', LEFT_W), sel ? { bgColor: 'cyan', color: 'black' } : { dim: true })
+  ui.newRoomY = lastRow
 }
 
 function drawUsers() {
@@ -562,8 +569,14 @@ function handleMouse(name, data) {
   }
 
   if (x >= 1 && x < divX && y >= firstRow && y <= lastRow) {
+    if (y === lastRow) {                       // [+ new room] footer
+      ui.selectedLine = ui.roomItems.length - 1
+      activateSelection()
+      return
+    }
+    if (y === lastRow - 1) return               // divider — nothing to click
     const idx = y - firstRow
-    if (idx >= 0 && idx < ui.roomItems.length) {
+    if (idx >= 0 && idx < ui.roomItems.length - 1) {
       ui.selectedLine = idx
       activateSelection()
     }

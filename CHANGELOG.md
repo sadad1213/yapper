@@ -6,6 +6,18 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.1.18
+
+### Русский
+- Кнопка «+ new room» перенесена в самый низ левого сайдбара (под
+  горизонтальный разделитель), а не висит сразу под последней комнатой.
+  Навигация стрелками и клик мышью работают как прежде.
+
+### English
+- The "+ new room" button moved to the very bottom of the left sidebar
+  (below a horizontal divider), instead of sitting right under the last
+  room. Arrow-key navigation and mouse clicks work as before.
+
 ## 0.1.17
 
 ### Русский
