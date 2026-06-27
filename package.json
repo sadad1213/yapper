@@ -1,0 +1,32 @@
+{
+  "name": "yapper",
+  "version": "0.1.0",
+  "description": "CLI voice chat for the terminal",
+  "type": "module",
+  "bin": {
+    "yapper": "./bin/yapper.js"
+  },
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node bin/yapper.js",
+    "server": "node bin/yapper.js server"
+  },
+  "keywords": [
+    "voip",
+    "cli",
+    "voice",
+    "chat",
+    "terminal"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "bonjour-service": "^1.4.2",
+    "conf": "^15.1.0",
+    "opusscript": "^0.1.1",
+    "terminal-kit": "^3.1.2",
+    "ws": "^8.21.0"
+  }
+}
