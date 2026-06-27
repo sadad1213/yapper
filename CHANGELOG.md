@@ -6,6 +6,22 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.1.25
+
+### Русский
+- Обновление больше не закрывает yapper. Вместо exit выводится оверлей с
+  анимированным спиннером и последними строками вывода npm; после успешной
+  установки появляется кнопка [R] (или Enter / клик), которая перезапускает
+  yapper прямо в текущем терминале в новую версию. ESC — остаться в старой
+  сессии. В случае ошибки показывается код и команда для ручной установки.
+
+### English
+- Updating no longer closes yapper. Instead of exiting, an overlay shows an
+  animated spinner and the last npm output lines; once the install succeeds, a
+  [R] button (or Enter / click) relaunches yapper in the same terminal into the
+  new version. ESC stays in the old session. On failure the exit code and a
+  manual install command are shown.
+
 ## 0.1.24
 
 ### Русский
