@@ -3,6 +3,7 @@ import { EventEmitter } from 'events'
 import { SAMPLE_RATE, CHANNELS } from './capture.js'
 import { Capture } from './capture.js'
 import { initPlayback, startMixer, stopMixer, queueFrame } from './playback.js'
+import { initDenoise } from './denoise.js'
 
 // Emits 'level' (0..1) on every captured frame — used by the UI VU meter.
 export const audioEvents = new EventEmitter()
@@ -62,6 +63,10 @@ function makeInput(deviceId) {
 // ─── Public API ────────────────────────────────────────────────────────────────
 export async function initAudio() {
   await loadOpus()
+
+  // Warm the RNNoise WASM in the background — the first capture frame uses it
+  // once ready, and passes audio through untouched until then.
+  initDenoise()
 
   // Prefer naudiodon (native, supports device selection)
   try {

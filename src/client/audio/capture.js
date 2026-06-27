@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events'
 import { isSilent, level } from './vad.js'
+import { denoiseFrame } from './denoise.js'
 
 export const SAMPLE_RATE = 48000
 export const CHANNELS = 1
@@ -60,8 +61,11 @@ export class Capture extends EventEmitter {
     if (!this.active) return
     this._buf = Buffer.concat([this._buf, chunk])
     while (this._buf.length >= FRAME_BYTES) {
-      const frame = this._buf.slice(0, FRAME_BYTES)
+      const raw = this._buf.slice(0, FRAME_BYTES)
       this._buf = this._buf.slice(FRAME_BYTES)
+      // Noise-suppress first, so the VU meter, VAD gate and Opus all see the
+      // cleaned signal (no-op pass-through when denoise is off/unavailable).
+      const frame = denoiseFrame(raw)
       this.emit('level', level(frame))         // always, for the VU meter
 
       if (!isSilent(frame)) {

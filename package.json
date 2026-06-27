@@ -1,6 +1,6 @@
 {
   "name": "yapper",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Fast, low-memory CLI voice chat for the terminal — serverless LAN, mouse-driven TUI",
   "type": "module",
   "bin": {
@@ -48,6 +48,7 @@
     "darwin"
   ],
   "dependencies": {
+    "@jitsi/rnnoise-wasm": "^0.2.1",
     "conf": "^15.1.0",
     "opusscript": "^0.1.1",
     "terminal-kit": "^3.1.2",

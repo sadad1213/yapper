@@ -2,6 +2,7 @@ import termkit from 'terminal-kit'
 import Conf from 'conf'
 import { createRequire } from 'module'
 import { getThreshold, setThreshold } from '../audio/vad.js'
+import { setDenoiseEnabled, isDenoiseEnabled, isDenoiseAvailable } from '../audio/denoise.js'
 import { getUserVolume, setUserVolume } from '../audio/playback.js'
 import { notifyRoomsChanged, notifyUpdateFound, notifyMuted, notifyUnmuted, notifyLeaving } from '../audio/notifications.js'
 import { preloadAll } from '../audio/loader.js'
@@ -338,7 +339,7 @@ function drawStatus() {
 function drawModal() {
   const { W, H } = L()
   const m = ui.modal
-  const bw = Math.min(54, W - 4), bh = 16
+  const bw = Math.min(54, W - 4), bh = 18
   const bx = Math.floor((W - bw) / 2), by = Math.floor((H - bh) / 2)
   m.rect = { bx, by, bw, bh }
   const C = { color: 'cyan' }
@@ -353,7 +354,7 @@ function drawModal() {
   putStr(bx + 2, by, ' settings ', { color: 'cyan', bold: true })
 
   const ix = bx + 2, rw = bw - 4
-  m.rowsY = [by + 2, by + 4, by + 6, by + 8, by + 10, by + 14]
+  m.rowsY = [by + 2, by + 4, by + 6, by + 8, by + 10, by + 12, by + 16]
 
   const uval = (m.editing && m.row === 0) ? m.edit + '█' : state.username
   modalField(ix, by + 2, rw, 'username', uval, m.row === 0)
@@ -373,21 +374,27 @@ function drawModal() {
   const thr = THRESHOLD_PRESETS[m.thresholdIdx]?.label || 'Normal (200)'
   modalField(ix, by + 8, rw, 'sensitivity', '‹ ' + thr + ' ›', m.row === 3)
 
-  // Row 4: check for updates — status shown inline so the button doubles as
+  // Row 4: noise suppression toggle. While enabled but the WASM hasn't loaded
+  // yet, say so — audio passes through untouched until it's ready.
+  const non = isDenoiseEnabled()
+  const nlabel = !non ? 'off' : isDenoiseAvailable() ? 'on' : 'on (loading…)'
+  modalField(ix, by + 10, rw, 'noise', '‹ ' + nlabel + ' ›', m.row === 4)
+
+  // Row 5: check for updates — status shown inline so the button doubles as
   // a result line ("up to date" / "update vX available" / "check failed").
   // Sticky while there is a pending update; transient otherwise (auto-clears
   // after 4s).
-  const csel = m.row === 4
+  const csel = m.row === 5
   let cval, cattr
   if (m.checkStatus === 'checking')    { cval = '⟳ checking…';                                      cattr = { color: 'yellow' } }
   else if (m.checkStatus === 'update') { cval = '! update v' + m.updateVer + ' available — press [U]'; cattr = { color: 'yellow', bold: true } }
   else if (m.checkStatus === 'latest') { cval = '✓ you are up to date';                                cattr = { color: 'green' } }
   else if (m.checkStatus === 'failed') { cval = '× check failed (rate limit / offline)';              cattr = { color: 'red', dim: true } }
   else                                 { cval = '▶ check for updates';                               cattr = {} }
-  putStr(ix, by + 10, padEnd(' ' + cval, rw), csel ? { bgColor: 'cyan', color: 'black' } : cattr)
+  putStr(ix, by + 12, padEnd(' ' + cval, rw), csel ? { bgColor: 'cyan', color: 'black' } : cattr)
 
-  putStr(ix + 1, by + 12, '↑↓ move · enter select · ‹ › adjust · esc close', { dim: true })
-  modalField(ix, by + 14, rw, '', '[ close ]', m.row === 5)
+  putStr(ix + 1, by + 14, '↑↓ move · enter select · ‹ › adjust · esc close', { dim: true })
+  modalField(ix, by + 16, rw, '', '[ close ]', m.row === 6)
 }
 
 function modalField(ix, y, rw, label, value, sel) {
@@ -604,10 +611,10 @@ function handleModalKey(name, data) {
     return
   }
   switch (name) {
-    case 'UP':    m.row = (m.row + 5) % 6; ui.dirty = true; break
-    case 'DOWN':  m.row = (m.row + 1) % 6; ui.dirty = true; break
-    case 'LEFT':  if (m.row === 1) cycleDevice(-1); else if (m.row === 3) cycleThreshold(-1); break
-    case 'RIGHT': if (m.row === 1) cycleDevice(1); else if (m.row === 3) cycleThreshold(1); break
+    case 'UP':    m.row = (m.row + 6) % 7; ui.dirty = true; break
+    case 'DOWN':  m.row = (m.row + 1) % 7; ui.dirty = true; break
+    case 'LEFT':  if (m.row === 1) cycleDevice(-1); else if (m.row === 3) cycleThreshold(-1); else if (m.row === 4) toggleDenoise(); break
+    case 'RIGHT': if (m.row === 1) cycleDevice(1); else if (m.row === 3) cycleThreshold(1); else if (m.row === 4) toggleDenoise(); break
     case 'ENTER': modalActivate(); break
     case 's': case 'S': case 'q': case 'Q': case 'ESCAPE': closeSettings(); break
   }
@@ -792,8 +799,16 @@ function modalActivate() {
   else if (m.row === 1) cycleDevice(1)
   else if (m.row === 2) toggleMicTest()
   else if (m.row === 3) cycleThreshold(1)
-  else if (m.row === 4) checkUpdateNow()
-  else if (m.row === 5) closeSettings()
+  else if (m.row === 4) toggleDenoise()
+  else if (m.row === 5) checkUpdateNow()
+  else if (m.row === 6) closeSettings()
+}
+
+function toggleDenoise() {
+  const next = !isDenoiseEnabled()
+  setDenoiseEnabled(next)
+  config.set('noiseSuppression', next)
+  ui.dirty = true
 }
 
 function cycleDevice(dir) {
@@ -956,6 +971,7 @@ export function startUI() {
   preloadAll()            // warm the SoX decode cache early
   config.set('username', state.username)
   setThreshold(config.get('vadThreshold', 200))
+  setDenoiseEnabled(config.get('noiseSuppression', true))
   loadVolumes()
   term.fullscreen(true)
   term.hideCursor()

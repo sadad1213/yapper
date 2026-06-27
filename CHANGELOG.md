@@ -6,6 +6,26 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.5
+
+### Русский
+- Шумоподавление на базе RNNoise (нейросеть, как в Discord/Jitsi). Чистит шум
+  микрофона — клавиатуру, гул, вентиляторы — перед VAD и кодеком, поэтому и
+  индикатор уровня, и собеседник слышат уже очищенный сигнал. Работает на WASM
+  (без нативной сборки), нагрузка на CPU ~2 мс на 20 мс кадр. Если WASM по
+  какой-то причине не загрузился — звук идёт без обработки, без падения.
+- Тумблер в настройках ([S] settings → noise). Включён по умолчанию, выбор
+  сохраняется между запусками. Пока WASM грузится, показывается «on (loading…)».
+
+### English
+- RNNoise-based noise suppression (neural net, like Discord/Jitsi). Cleans mic
+  noise — keyboard, hum, fans — before the VAD and codec, so both the level
+  meter and the other person hear the already-cleaned signal. Runs on WASM (no
+  native build), costing ~2 ms per 20 ms frame. If the WASM fails to load for
+  any reason, audio passes through unprocessed — no crash.
+- Toggle in settings ([S] settings → noise). On by default, the choice persists
+  across restarts. While the WASM is loading it shows "on (loading…)".
+
 ## 0.2.4
 
 ### Русский

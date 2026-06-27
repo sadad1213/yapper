@@ -86,7 +86,7 @@ yapper --help
 - **M** — mute / unmute yourself
 - **N** — create a new room (`+ new room` lives at the bottom of the sidebar)
 - **D** — delete the selected custom room (defaults can't be deleted; asks for confirmation)
-- **S** — settings (username, microphone, mic test, VAD sensitivity)
+- **S** — settings (username, microphone, mic test, VAD sensitivity, noise suppression)
 - **C** — open the changelog (shown after an update, to the left of the version; auto-hides after 30s)
 - **U** — install the latest update (shown in the status bar when one is available)
 - **Q** — quit
