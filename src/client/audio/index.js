@@ -28,29 +28,45 @@ async function tryNaudiodon() {
 }
 
 function hasSox() {
-  try { execSync('where sox', { stdio: 'ignore' }); return true } catch { return false }
+  const cmd = process.platform === 'win32' ? 'where sox' : 'which sox'
+  try { execSync(cmd, { stdio: 'ignore' }); return true } catch { return false }
+}
+
+async function trySox() {
+  const { SoxCapture, SoxPlayback } = await import('./sox.js')
+  return { inStream: new SoxCapture(), outStream: new SoxPlayback() }
 }
 
 export async function initAudio() {
   const { encoder, decoder } = await loadOpus()
 
+  let inStream, outStream
+
+  // Try naudiodon first (best quality, native PortAudio)
   try {
-    const { inStream, outStream } = await tryNaudiodon()
-    initPlayback(decoder, outStream)
-    captureInstance = new Capture(encoder, inStream)
-    return { available: true, queueFrame }
+    const nd = await tryNaudiodon()
+    inStream  = nd.inStream
+    outStream = nd.outStream
   } catch {
+    // Fall back to SoX
     if (!hasSox()) {
       return {
         available: false,
         reason:
-          'Audio requires naudiodon (Visual Studio Build Tools) or SoX.\n' +
-          'Install SoX: https://sourceforge.net/projects/sox/\n' +
-          'Or: npm install naudiodon --build-from-source',
+          'Audio requires naudiodon or SoX.\n' +
+          'Option 1 — Install SoX (easier): https://sourceforge.net/projects/sox/files/sox/\n' +
+          'Option 2 — Build naudiodon: needs Visual Studio Build Tools + Python,\n' +
+          '           then: npm install naudiodon --build-from-source',
       }
     }
-    return { available: false, reason: 'SoX audio backend not yet implemented' }
+    const sox = await trySox()
+    inStream  = sox.inStream
+    outStream = sox.outStream
   }
+
+  initPlayback(decoder, outStream)
+  captureInstance = new Capture(encoder, inStream)
+  return { available: true, queueFrame }
 }
 
 export function startCapture(sendFn) {
