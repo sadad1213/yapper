@@ -16,7 +16,7 @@ const require = createRequire(import.meta.url)
 const VERSION = require('../../../package.json').version
 
 const LEFT_W = 22            // inner width of the left (rooms) panel
-const MAX_USERNAME = 32       // matches the server-side slice(0, 32)
+const MAX_USERNAME = 16       // short chars; server-side slice(0, 32) lets it through
 const MAX_ROOMNAME = 20       // short enough to fit a sidebar row: `▸ <name> <count>` in LEFT_W
 
 const THRESHOLD_PRESETS = [

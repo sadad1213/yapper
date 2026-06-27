@@ -6,6 +6,16 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.1.24
+
+### Русский
+- Лимит длины ника уменьшен с 32 до 16 символов (так ижеще достаточно для
+  ника, но не даёт длиным именам ломать вёрстку правой панели).
+
+### English
+- Username length limit lowered from 32 to 16 chars (still plenty for a
+  nickname, but long names no longer break the right-panel layout).
+
 ## 0.1.23
 
 ### Русский
