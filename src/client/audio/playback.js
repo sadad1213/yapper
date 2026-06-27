@@ -1,10 +1,19 @@
-import { FRAME_SIZE, FRAME_BYTES, CHANNELS } from './capture.js'
+import { FRAME_SIZE, FRAME_BYTES } from './capture.js'
 
-// Per-user jitter buffer: userId → Buffer[]
-const queues = new Map()
+const FRAME_MS = 20
+const JITTER_TARGET = 3     // pre-roll frames (~60ms) to absorb network jitter
+const MAX_BUFFER = 20       // ~400ms hard cap before dropping oldest frames
+
+const SILENCE = Buffer.alloc(FRAME_BYTES)
+
+// userId → { frames: Buffer[], playing: boolean }
+const users = new Map()
+
 let outputStream = null
 let decoder = null
-let mixTimer = null
+let timer = null
+let startTime = null
+let framesWritten = 0
 
 export function initPlayback(dec, stream) {
   decoder = dec
@@ -13,39 +22,61 @@ export function initPlayback(dec, stream) {
 }
 
 export function startMixer() {
-  if (mixTimer) return
-  mixTimer = setInterval(() => {
-    const frames = []
-    for (const [id, queue] of queues) {
-      if (queue.length > 0) frames.push(queue.shift())
-      if (queue.length === 0) queues.delete(id)
-    }
-    if (frames.length === 0 || !outputStream) return
-    const mixed = mixFrames(frames)
-    outputStream.write(mixed)
-  }, 20)
+  if (timer) return
+  startTime = Date.now()
+  framesWritten = 0
+  // Tick faster than the frame rate; the wall-clock drift correction in tick()
+  // decides how many 20ms frames are actually due, so output stays in realtime.
+  timer = setInterval(tick, 10)
 }
 
 export function stopMixer() {
-  clearInterval(mixTimer)
-  mixTimer = null
-  queues.clear()
+  clearInterval(timer)
+  timer = null
+  users.clear()
+  startTime = null
+  framesWritten = 0
 }
 
 export function queueFrame(userId, opusData) {
   if (!decoder) return
-  try {
-    const pcm = decoder.decode(Buffer.from(opusData), FRAME_SIZE)
-    const buf = Buffer.from(pcm)   // copy exact PCM bytes, not the whole internal buffer
-    if (!queues.has(userId)) queues.set(userId, [])
-    const q = queues.get(userId)
-    // Drop if too far behind to avoid audio delay buildup
-    if (q.length < 10) q.push(buf)
-  } catch {}
+  let pcm
+  try { pcm = Buffer.from(decoder.decode(Buffer.from(opusData), FRAME_SIZE)) }
+  catch { return }
+
+  let u = users.get(userId)
+  if (!u) { u = { frames: [], playing: false }; users.set(userId, u) }
+  u.frames.push(pcm)
+  if (u.frames.length > MAX_BUFFER) u.frames.splice(0, u.frames.length - MAX_BUFFER)
 }
 
-function mixFrames(buffers) {
-  if (buffers.length === 1) return buffers[0]
+function tick() {
+  if (!outputStream || startTime == null) return
+  const due = Math.floor((Date.now() - startTime) / FRAME_MS)
+  let n = due - framesWritten
+  if (n <= 0) return
+  if (n > 5) { framesWritten = due - 1; n = 1 }   // we stalled — resync instead of fast-forwarding
+  for (let i = 0; i < n; i++) { writeFrame(); framesWritten++ }
+}
+
+function writeFrame() {
+  const active = []
+  for (const u of users.values()) {
+    if (!u.playing) {
+      if (u.frames.length >= JITTER_TARGET) u.playing = true   // pre-roll reached
+      else continue                                            // still buffering → silent
+    }
+    if (u.frames.length > 0) active.push(u.frames.shift())
+    else u.playing = false                                     // underran → rebuffer before resuming
+  }
+
+  const out = active.length === 0 ? SILENCE
+            : active.length === 1 ? active[0]
+            : mix(active)
+  outputStream.write(out)
+}
+
+function mix(buffers) {
   const result = Buffer.alloc(FRAME_BYTES)
   for (let i = 0; i < FRAME_BYTES; i += 2) {
     let s = 0
