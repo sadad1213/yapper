@@ -108,6 +108,7 @@ else {
     // re-sending `leave`, same as a disconnect teardown of the audio path.
     handlers.onForcedLeave = () => {
       stopCapture()
+      import('./client/audio/notifications.js').then(({ notifyLeaving }) => notifyLeaving())
     }
   }
 

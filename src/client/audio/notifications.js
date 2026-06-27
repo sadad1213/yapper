@@ -17,6 +17,11 @@ let _lastRoom = null
 async function playJoinSound()  { playSystemSound(await loadSound('join')) }
 async function playLeaveSound() { playSystemSound(await loadSound('leave')) }
 
+// Local feedback for the user's OWN leave action (ESC or switching rooms).
+// Fires in addition to the other-user leave detection so you reliably hear
+// something even when testing solo.
+export async function notifyLeaving() { playSystemSound(await loadSound('leave')) }
+
 // ─── public ───────────────────────────────────────────────────────────────
 
 /** Call this every time the `rooms` snapshot arrives. */
@@ -61,3 +66,8 @@ export function notifyRoomsChanged(newRooms, currentRoom, selfId) {
 export async function notifyUpdateFound() {
   playSystemSound(await loadSound('update'))
 }
+
+/** Play the local mute / unmute feedback.  Call when the local mic toggle
+ *  flips so the user hears confirmation through their speakers. */
+export async function notifyMuted()   { playSystemSound(await loadSound('mute')) }
+export async function notifyUnmuted() { playSystemSound(await loadSound('unmute')) }

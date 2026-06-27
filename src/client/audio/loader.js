@@ -18,15 +18,17 @@ const ROOT = join(__dirname, '..', '..', '..')
 
 const FILES = {
   join:   { path: join(ROOT, 'audio', 'snd_splash.wav'),   ext: '.wav' },
-  leave:  { path: join(ROOT, 'audio', 'mus_doorclose.ogg'), ext: '.ogg' },
-  update: { path: join(ROOT, 'audio', 'mus_piano7.wav'),   ext: '.wav' },
+  leave:  { path: join(ROOT, 'audio', 'snd_arrow.wav'),     ext: '.wav' },
+  update: { path: join(ROOT, 'audio', 'snd_textnoise.wav'), ext: '.wav' },
+  mute:   { path: join(ROOT, 'audio', 'mus_piano5.wav'),    ext: '.wav' },
+  unmute: { path: join(ROOT, 'audio', 'mus_piano7.wav'),    ext: '.wav' },
 }
 
 // Cached PCM buffers — decoded once, reused forever.
-const cache = { join: null, leave: null, update: null }
+const cache = { join: null, leave: null, update: null, mute: null, unmute: null }
 
 // Map of pending decode promises so concurrent callers share one operation.
-const pending = { join: null, leave: null, update: null }
+const pending = { join: null, leave: null, update: null, mute: null, unmute: null }
 
 // ─── SoX availability ───────────────────────────────────────────────────────
 

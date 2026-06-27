@@ -6,6 +6,26 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.2
+
+### Русский
+- Звук мьюта: при выключении микрофона играется mus_piano5.wav, при
+  включении — mus_piano7.wav (локальный отклик через колонки).
+- Звук выхода из румы заменён с mus_doorclose.ogg на snd_arrow.wav
+  (теперь работает и без SoX через встроенный JS WAV-декодер).
+- Звук нахождения обновления заменён с mus_piano7.wav на snd_textnoise.wav.
+- Теперь arrow звучит и при собственном выходе из румы (ESC / смена румы /
+  удаление), а не только когда руму покидает кто-то другой
+
+### English
+- Mute sound: muting plays mus_piano5.wav, unmuting plays mus_piano7.wav
+  (local speaker feedback).
+- Leaving a room now uses snd_arrow.wav instead of mus_doorclose.ogg (works
+  without SoX via the built-in JS WAV decoder).
+- Update-found sound changed from mus_piano7.wav to snd_textnoise.wav.
+- The leave chime now also fires on your own leave action (ESC / switching
+  rooms / room deleted), not only when someone else departs.
+
 ## 0.2.1
 
 ### Русский

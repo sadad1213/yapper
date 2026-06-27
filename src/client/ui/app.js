@@ -3,7 +3,7 @@ import Conf from 'conf'
 import { createRequire } from 'module'
 import { getThreshold, setThreshold } from '../audio/vad.js'
 import { getUserVolume, setUserVolume } from '../audio/playback.js'
-import { notifyRoomsChanged, notifyUpdateFound } from '../audio/notifications.js'
+import { notifyRoomsChanged, notifyUpdateFound, notifyMuted, notifyUnmuted, notifyLeaving } from '../audio/notifications.js'
 import { preloadAll } from '../audio/loader.js'
 import { checkForUpdate, clearPendingUpdate, checkForUpdateManual, fetchChangelog } from '../../auto-update.js'
 
@@ -559,7 +559,7 @@ function handleKey(name, matches, data) {
     case 'UP':    move(-1); break
     case 'DOWN':  move(1); break
     case 'ENTER': activateSelection(); break
-    case 'ESCAPE': if (state.currentRoom && handlers.onLeave) handlers.onLeave(); break
+    case 'ESCAPE': if (state.currentRoom && handlers.onLeave) { notifyLeaving(); handlers.onLeave(); } break
     case 'm': case 'M': toggleMute(); break
     case 's': case 'S': openSettings(); break
     case 'n': case 'N': promptNewRoom(); break
@@ -698,7 +698,7 @@ function activateSelection() {
 
 function joinRoom(name) {
   if (name === state.currentRoom) return
-  if (state.currentRoom && handlers.onLeave) handlers.onLeave()   // leave old room before joining new one
+  if (state.currentRoom && handlers.onLeave) { notifyLeaving(); handlers.onLeave() }   // leave old room before joining new one
   if (handlers.onJoin) handlers.onJoin(name)
   else state.currentRoom = name
   ui.dirty = true
@@ -707,6 +707,9 @@ function joinRoom(name) {
 function toggleMute() {
   state.muted = !state.muted
   handlers.onMute?.(state.muted)
+  // Local confirmation chime through the speakers.  Fire-and-forget — the
+  // sounds are pre-loaded at startup, so this is effectively instant.
+  if (state.muted) notifyMuted(); else notifyUnmuted()
   ui.dirty = true
 }
 

@@ -45,6 +45,20 @@ yapper
 > First run shows a one-time audio setup wizard (installs SoX automatically, or
 > builds native `naudiodon` if you prefer). Press `3` to skip and run without audio.
 
+## Sound notifications
+
+| Event | Sound |
+|-------|-------|
+| Someone joins your room | `snd_splash.wav` |
+| You / someone leaves a room | `snd_arrow.wav` |
+| You mute your mic | `mus_piano5.wav` |
+| You unmute your mic | `mus_piano7.wav` |
+| Update available | `snd_textnoise.wav` |
+
+All sounds live in the `audio/` directory and ship with the package. They are
+decoded via SoX to 48 kHz mono, with a built-in pure-JS WAV decoder as a
+fallback when SoX is absent. See [audio/](audio/) for the bundled files.
+
 ## How it works
 
 There is **no separate server**. Each `yapper` instance discovers a host on the
@@ -71,6 +85,7 @@ yapper --help
 - **ESC** — leave the current room (or close any open popup/modal)
 - **M** — mute / unmute yourself
 - **N** — create a new room (`+ new room` lives at the bottom of the sidebar)
+- **D** — delete the selected custom room (defaults can't be deleted; asks for confirmation)
 - **S** — settings (username, microphone, mic test, VAD sensitivity)
 - **C** — open the changelog (shown after an update, to the left of the version; auto-hides after 30s)
 - **U** — install the latest update (shown in the status bar when one is available)
