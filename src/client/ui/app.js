@@ -636,7 +636,7 @@ async function runUpdate() {
   console.log('\n' + '─'.repeat(40))
   console.log('  yapper — updating to latest...\n')
 
-  const child = spawn('npm', ['install', '-g', 'github:sadad1213/yapper'], {
+  const child = spawn('npm', ['install', '-g', 'https://github.com/sadad1213/yapper/archive/refs/heads/main.tar.gz'], {
     stdio: 'inherit',
     shell: true,
   })
@@ -648,7 +648,7 @@ async function runUpdate() {
       clearPendingUpdate()
     } else {
       console.log('  ✗ Update failed (code ' + code + '). Try manually:')
-      console.log('    npm install -g github:sadad1213/yapper')
+      console.log('    npm install -g https://github.com/sadad1213/yapper/archive/refs/heads/main.tar.gz')
     }
     process.exit(code ?? 1)
   })

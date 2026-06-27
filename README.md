@@ -22,7 +22,7 @@ driven TUI with rooms, a live mic meter, and a built-in audio setup wizard.
 From GitHub (no npm account needed):
 
 ```bash
-npm install -g github:sadad1213/yapper
+npm install -g https://github.com/sadad1213/yapper/archive/refs/heads/main.tar.gz
 ```
 
 Then run:
