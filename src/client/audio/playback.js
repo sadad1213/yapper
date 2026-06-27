@@ -82,11 +82,18 @@ export function playSystemSound(pcmBuf) {
 
   let u = users.get(SYSTEM_USER)
   if (!u) {
-    u = { frames: [], playing: true }   // no jitter pre-roll for system sounds
+    u = { frames: [], playing: true, timer: null }   // no jitter pre-roll for system sounds
     users.set(SYSTEM_USER, u)
   } else {
     u.playing = true                    // re-arm in case previous sound drained
   }
+
+  // Interrupt any sound still playing: drop the buffered-but-unplayed frames of
+  // the previous notification so the new one starts immediately instead of
+  // queueing behind it.  Also cancel that previous teardown timer; the fresh
+  // one we schedule below is the only one allowed to stop the mixer.
+  u.frames.length = 0
+  if (u.timer) { clearTimeout(u.timer); u.timer = null }
 
   const frameCount = Math.floor(pcmBuf.length / FRAME_BYTES)
   for (let i = 0; i < frameCount; i++) {
@@ -97,14 +104,18 @@ export function playSystemSound(pcmBuf) {
   // sounds (e.g. the 2 s update chime).
 
   // When we spun up the mixer just for this sound, tear it down afterwards.
-  // Real voice frames from other users (nonzero userId) keep it alive.
+  // Real voice frames from other users (nonzero userId) keep it alive.  The
+  // timer is tracked on the SYSTEM_USER slot so the next call clears it.
   if (!wasRunning) {
     const durationMs = frameCount * FRAME_MS + SOUND_GRACE_MS
-    setTimeout(() => {
+    u.timer = setTimeout(() => {
+      if (u.timer) { u.timer = null }
+      const sys = users.get(SYSTEM_USER)
       const hasVoice = [...users.keys()].some(
         id => id !== SYSTEM_USER && (users.get(id)?.frames?.length ?? 0) > 0
       )
-      if (!hasVoice) stopMixer()
+      // Don't stop if a newer sound replaced this slot (sys !== u) or is still draining.
+      if (sys === u && !hasVoice) stopMixer()
     }, durationMs)
   }
 }

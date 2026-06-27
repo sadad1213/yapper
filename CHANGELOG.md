@@ -6,6 +6,24 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.3
+
+### Русский
+- Фикс: новый системный звук теперь мгновенно прерывает предыдущий. Раньше
+  frames копились в очередь — например, звук размута ждал ~2 с окончания звука
+  мьюта. Теперь при запуске нового звука буфер SYSTEM_USER очищается,
+  а старый teardown-таймер отменяется, так что переключение звучит сразу.
+  Бонусом пропал риск того, что «протухший» таймер от первого звука гасил
+  микшер прямо посреди второго.
+
+### English
+- Fix: a new system sound now interrupts the previous one instantly.  Frames
+  used to queue — e.g. the unmute chime waited ~2 s for the mute chime to
+  finish.  Starting a new sound now clears the SYSTEM_USER frame buffer and
+  cancels the previous teardown timer, so the switch is immediate.  Also fixes
+  a latent bug where a stale timer from the first sound could stop the mixer
+  mid-way through the second.
+
 ## 0.2.2
 
 ### Русский
