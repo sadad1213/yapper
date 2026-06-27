@@ -6,6 +6,32 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.4
+
+### Русский
+- Качество голоса в звонках заметно чище. Раньше кадр уходил по сети только
+  пока громкость выше порога VAD — это обрезало тихое начало слов («речь
+  собеседника начиналась лаганно») и рвало поток в паузах между словами, отчего
+  Opus давал артефакты на стыках («лёгкие искажения»). Теперь VAD сглажен:
+  pre-roll (~60 мс) подхватывает мягкую атаку слова, а hangover (~300 мс)
+  держит поток непрерывным сквозь короткие межсловные провалы, так что приёмный
+  джиттер-буфер не опустошается и не заикается.
+- Кодек Opus настроен под LAN: битрейт поднят до 64 kbps (было авто ~24–32),
+  сложность 10 (макс. качество), сигнал — «голос». На локальной сети это ~8 КБ/с.
+
+### English
+- Noticeably cleaner voice quality in calls. Frames used to be sent only while
+  the level was above the VAD threshold — that clipped the quiet onset of words
+  (a "laggy" start to the other person's speech) and tore the stream apart in
+  the gaps between words, so Opus produced artefacts at the seams ("light
+  distortions"). The VAD is now smoothed: a pre-roll (~60 ms) captures the soft
+  attack of a word, and a hangover (~300 ms) keeps the stream continuous across
+  brief inter-word dips, so the receiver's jitter buffer no longer drains and
+  stutters.
+- Opus codec tuned for LAN: bitrate raised to 64 kbps (was auto ~24–32),
+  complexity 10 (max quality), signal set to voice. On a local network that's
+  only ~8 KB/s.
+
 ## 0.2.3
 
 ### Русский

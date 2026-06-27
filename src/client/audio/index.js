@@ -19,6 +19,14 @@ async function loadOpus() {
   const { default: OpusScript } = await import('opusscript')
   encoder = new OpusScript(SAMPLE_RATE, CHANNELS, OpusScript.Application.VOIP)
   decoder = new OpusScript(SAMPLE_RATE, CHANNELS)
+  // We're on a LAN/VPN — bandwidth is cheap, so favour quality over compression.
+  // Opus' VOIP default lands around ~24-32 kbps; a clean mono voice stream at
+  // 64 kbps is effectively transparent and still only ~8 KB/s.
+  try {
+    encoder.setBitrate(64000)        // OPUS_SET_BITRATE
+    encoder.encoderCTL(4010, 10)     // OPUS_SET_COMPLEXITY = 10 (max quality)
+    encoder.encoderCTL(4024, 3001)   // OPUS_SET_SIGNAL = OPUS_SIGNAL_VOICE
+  } catch {}
 }
 
 // ─── naudiodon helpers (robust to API shape differences) ───────────────────────
