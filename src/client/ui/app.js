@@ -383,6 +383,7 @@ function handleKey(name, matches, data) {
     case 'UP':    move(-1); break
     case 'DOWN':  move(1); break
     case 'ENTER': activateSelection(); break
+    case 'ESCAPE': if (state.currentRoom && handlers.onLeave) handlers.onLeave(); break
     case 'm': case 'M': toggleMute(); break
     case 's': case 'S': openSettings(); break
     case 'n': case 'N': promptNewRoom(); break

@@ -1,4 +1,8 @@
 import { parseArgs } from 'util'
+import { createRequire } from 'module'
+
+const require = createRequire(import.meta.url)
+const { version } = require('../package.json')
 
 const { values, positionals } = parseArgs({
   options: {
@@ -10,7 +14,7 @@ const { values, positionals } = parseArgs({
 })
 
 if (values.version) {
-  console.log('yapper v0.1.0')
+  console.log(`yapper v${version}`)
   process.exit(0)
 }
 
