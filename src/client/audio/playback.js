@@ -92,7 +92,9 @@ export function playSystemSound(pcmBuf) {
   for (let i = 0; i < frameCount; i++) {
     u.frames.push(pcmBuf.slice(i * FRAME_BYTES, (i + 1) * FRAME_BYTES))
   }
-  if (u.frames.length > MAX_BUFFER) u.frames.splice(0, u.frames.length - MAX_BUFFER)
+  // No MAX_BUFFER cap here — system sounds are a known finite buffer and the
+  // mixer drains them in real-time.  Capping would silently truncate longer
+  // sounds (e.g. the 2 s update chime).
 
   // When we spun up the mixer just for this sound, tear it down afterwards.
   // Real voice frames from other users (nonzero userId) keep it alive.

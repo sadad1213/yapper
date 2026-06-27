@@ -4,6 +4,7 @@ import { createRequire } from 'module'
 import { getThreshold, setThreshold } from '../audio/vad.js'
 import { getUserVolume, setUserVolume } from '../audio/playback.js'
 import { notifyRoomsChanged, notifyUpdateFound } from '../audio/notifications.js'
+import { preloadAll } from '../audio/loader.js'
 import { checkForUpdate, clearPendingUpdate, resetUpdateCache, fetchChangelog } from '../../auto-update.js'
 
 const term = termkit.terminal
@@ -888,6 +889,7 @@ function loop() {
 }
 
 export function startUI() {
+  preloadAll()            // warm the SoX decode cache early
   config.set('username', state.username)
   setThreshold(config.get('vadThreshold', 200))
   loadVolumes()

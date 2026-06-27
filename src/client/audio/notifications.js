@@ -7,10 +7,17 @@
 // already knows when an update check returns a newer version).
 
 import { playSystemSound } from './playback.js'
-import { joinPCM, leavePCM, updatePCM } from './sounds.js'
+import { loadSound } from './loader.js'
 
 let _lastIds = new Set()       // userIds that were in the user's current room
 let _lastRoom = null
+
+// ─── helpers ──────────────────────────────────────────────────────────────
+
+async function playJoinSound()  { playSystemSound(await loadSound('join')) }
+async function playLeaveSound() { playSystemSound(await loadSound('leave')) }
+
+// ─── public ───────────────────────────────────────────────────────────────
 
 /** Call this every time the `rooms` snapshot arrives. */
 export function notifyRoomsChanged(newRooms, currentRoom, selfId) {
@@ -34,15 +41,15 @@ export function notifyRoomsChanged(newRooms, currentRoom, selfId) {
   // Joined since last snapshot (exclude self)
   for (const id of nowIds) {
     if (!_lastIds.has(id) && id !== selfId) {
-      playSystemSound(joinPCM())
-      break   // one beep per batch, even if multiple people joined
+      playJoinSound()    // fire-and-forget — cached after first load
+      break
     }
   }
 
   // Left since last snapshot (exclude self)
   for (const id of _lastIds) {
     if (!nowIds.has(id) && id !== selfId) {
-      playSystemSound(leavePCM())
+      playLeaveSound()
       break
     }
   }
@@ -51,6 +58,6 @@ export function notifyRoomsChanged(newRooms, currentRoom, selfId) {
 }
 
 /** Play the "update available" chime. Safe to call at any time. */
-export function notifyUpdateFound() {
-  playSystemSound(updatePCM())
+export async function notifyUpdateFound() {
+  playSystemSound(await loadSound('update'))
 }

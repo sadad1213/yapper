@@ -6,6 +6,28 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.1.30
+
+### Русский
+- Звуки уведомлений теперь загружаются из настоящих аудиофайлов (audio/):
+  snd_splash.wav (заход в руму), mus_doorclose.ogg (выход), mus_piano7.wav
+  (найдено обновление). Декодирование через SoX — на лету в моно 48 кГц,
+  кешируется после первого воспроизведения. Если SoX отсутствует —
+  автоматический фолбек на синтезированные PCM-тона.
+- Починен обрез буфера системных звуков: длинные файлы (2 с) теперь
+  проигрываются полностью, без ограничения 400 мс.
+- Файлы audio/ добавлены в npm-пакет.
+
+### English
+- Notification sounds now load from real audio files (audio/):
+  snd_splash.wav (join), mus_doorclose.ogg (leave), mus_piano7.wav
+  (update found). Decoded via SoX to 48 kHz mono on-the-fly, cached after
+  first play. Automatic fallback to synthesised PCM tones when SoX is
+  unavailable.
+- Fixed system-sound buffer truncation: long files (2 s) now play in
+  full instead of being capped at 400 ms.
+- audio/ directory added to the npm bundle.
+
 ## 0.1.29
 
 ### Русский
