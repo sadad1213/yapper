@@ -6,6 +6,14 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.1.26
+
+### Русский
+- Technical release to verify the in-place update system.
+
+### English
+- Technical release to verify the in-place update system.
+
 ## 0.1.25
 
 ### Русский

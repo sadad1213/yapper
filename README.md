@@ -18,7 +18,7 @@ driven TUI with rooms, a live mic meter, and a built-in audio setup wizard.
 │ ───────────────────── │ your mic   ████████░░░░░░                      │
 │ + new room            │                                                │
 ├───────────────────────┴────────────────────────────────────────────────┤
-│[M] mute  [N] new room  [S] settings  [C] changelog  [Q] quit    v0.1.22│
+│[M] mute  [N] new room  [S] settings  [C] changelog  [Q] quit    v0.1.26│
 ╰────────────────────────────────────────────────────────────────────────╯
 ```
 
