@@ -12,7 +12,7 @@ const config = new Conf({ projectName: 'yapper' })
 
 // Read version from package.json so status bar is always correct
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const VERSION = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8')).version
+const VERSION = JSON.parse(readFileSync(join(__dirname, '..', '..', '..', 'package.json'), 'utf8')).version
 
 const LEFT_W = 22            // inner width of the left (rooms) panel
 
