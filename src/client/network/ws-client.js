@@ -98,6 +98,7 @@ export function send(obj) {
 }
 
 export function sendAudio(frame) {
+  if (state.muted) return                     // client-side mute — don't even send
   if (ws?.readyState === WebSocket.OPEN) ws.send(frame)
 }
 
