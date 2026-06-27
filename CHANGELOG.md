@@ -6,6 +6,19 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.1.27
+
+### Русский
+- Откат системы обновления к старому варианту: yapper закрывается, ставит
+  обновление в консоли и просит запустить его заново. Возвращено, потому что
+  прошлый оверлей со спиннером ломал интерфейс (terminal-kit fullscreen
+  конфликтовал с выводом npm).
+
+### English
+- Reverted the updater to the old flow: yapper exits, installs in the console,
+  and asks you to run it again. Rolled back because the previous spinner overlay
+  garbled the interface (terminal-kit fullscreen conflicted with npm's output).
+
 ## 0.1.26
 
 ### Русский

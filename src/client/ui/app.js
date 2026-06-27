@@ -57,7 +57,6 @@ const ui = {
   prompt: null,              // text-input overlay (new room)
   volumePopup: null,         // per-user volume overlay { userId, username, vol }
   changelog: null,           // changelog overlay { title, rawLines, lines, scroll, rect }
-  update: null,              // update overlay { phase, lines, code, rect }
   userZones: [],             // clickable user rows [{ x0, x1, y, userId, username }]
   roomItems: [],             // left-panel navigation [{ type:'room'|'user'|'newRoom', ... }]
   selectedLine: 0,           // index into roomItems
@@ -129,7 +128,6 @@ function drawAll() {
   if (ui.modal) drawModal()
   if (ui.prompt) drawPrompt()
   if (ui.volumePopup) drawVolumePopup()
-  if (ui.update) drawUpdate()
   if (ui.changelog) drawChangelog()
   sb.draw({ delta: true })
 }
@@ -505,86 +503,10 @@ function handleChangelogMouse(name, x, y) {
   }
 }
 
-// ─── Update overlay ───────────────────────────────────────────────────────────
-const SPINNER = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏']
-function updateBox() {
-  const { W, H } = L()
-  const bw = Math.min(56, W - 4)
-  const bh = 12
-  const bx = Math.floor((W - bw) / 2)
-  const by = Math.floor((H - bh) / 2)
-  return { W, H, bw, bh, bx, by }
-}
-function drawUpdate() {
-  const { bw, bh, bx, by } = updateBox()
-  const u = ui.update
-  u.rect = { bx, by, bw, bh }
-  const C = { color: 'cyan' }
-  putStr(bx, by, '╭' + '─'.repeat(bw - 2) + '╮', C)
-  for (let i = 1; i < bh - 1; i++) {
-    putStr(bx, by + i, '│', C)
-    putStr(bx + 1, by + i, ' '.repeat(bw - 2), {})
-    putStr(bx + bw - 1, by + i, '│', C)
-  }
-  putStr(bx, by + bh - 1, '╰' + '─'.repeat(bw - 2) + '╯', C)
-  putStr(bx + 2, by, ' updating ', { color: 'cyan', bold: true })
-
-  const ix = bx + 2, rw = bw - 4
-  if (u.phase === 'downloading') {
-    const sp = SPINNER[Math.floor(Date.now() / 100) % SPINNER.length]
-    putStr(ix, by + 2, padEnd(`${sp}  downloading & installing the latest version…`, rw), { color: 'yellow' })
-    for (let i = 0; i < 7; i++) {
-      const line = u.lines[i] || ''
-      putStr(ix, by + 3 + i, padEnd(line, rw), { dim: true })
-    }
-    putStr(bx + 2, by + bh - 1, ' please wait · esc to cancel ', { dim: true })
-  } else if (u.phase === 'done') {
-    putStr(ix, by + 2, padEnd('✓ update complete', rw), { color: 'green', bold: true })
-    putStr(ix, by + 4, padEnd('yapper is now up to date.', rw), {})
-    putStr(ix, by + 5, padEnd('Press [R] (or Enter) to restart into the new version.', rw), { dim: true })
-    putStr(bx + 2, by + bh - 1, ' [R] restart · esc stay in old session ', { dim: true })
-  } else {
-    putStr(ix, by + 2, padEnd('✗ update failed', rw), { color: 'red', bold: true })
-    putStr(ix, by + 4, padEnd(`npm exited with code ${u.code}`, rw), {})
-    putStr(ix, by + 5, padEnd('Try `yapper setup` or install manually:', rw), { dim: true })
-    putStr(ix, by + 6, padEnd('npm i -g github:sadad1213/yapper#main', rw), { dim: true })
-    putStr(bx + 2, by + bh - 1, ' esc close ', { dim: true })
-  }
-}
-
-function handleUpdateKey(name) {
-  const u = ui.update
-  if (!u) return
-  if (u.phase === 'downloading') {
-    if (name === 'ESCAPE' || name === 'q' || name === 'Q') { ui.update = null; ui.dirty = true }   // cancel the wait; child keeps running in bg
-  } else if (u.phase === 'done') {
-    if (name === 'r' || name === 'R' || name === 'ENTER') relaunchYapper()
-    else if (name === 'ESCAPE' || name === 'q' || name === 'Q') { ui.update = null; ui.dirty = true }
-  } else {                                   // failed
-    if (name === 'ESCAPE' || name === 'q' || name === 'Q' || name === 'ENTER') { ui.update = null; ui.dirty = true }
-  }
-}
-
-function handleUpdateMouse(name, x, y) {
-  const u = ui.update
-  if (!u) return
-  if (name !== 'MOUSE_LEFT_BUTTON_PRESSED') return
-  const r = u.rect
-  if (!r) return
-  // Click anywhere inside the box confirms on the done/failed phases; outside cancels.
-  if (x < r.bx || x > r.bx + r.bw - 1 || y < r.by || y > r.by + r.bh - 1) {
-    if (u.phase !== 'downloading') { ui.update = null; ui.dirty = true }
-    return
-  }
-  if (u.phase === 'done') relaunchYapper()
-  else if (u.phase === 'failed') { ui.update = null; ui.dirty = true }
-}
-
 // ─── Input: keyboard ──────────────────────────────────────────────────────────
 function handleKey(name, matches, data) {
   if (name === 'CTRL_C') return quit()
   if (ui.volumePopup) return handleVolumeKey(name)
-  if (ui.update) return handleUpdateKey(name)
   if (ui.changelog) return handleChangelogKey(name)
   if (ui.prompt) return handlePromptKey(name, data)
   if (ui.modal)  return handleModalKey(name, data)
@@ -646,7 +568,6 @@ function handleMouse(name, data) {
     if (name === 'MOUSE_LEFT_BUTTON_PRESSED') closeVolumePopup()
     return
   }
-  if (ui.update) return handleUpdateMouse(name, x, y)
   if (ui.changelog) return handleChangelogMouse(name, x, y)
   if (ui.prompt) {              // click anywhere outside closes the prompt
     return
@@ -866,52 +787,37 @@ function quit() {
 }
 
 async function runUpdate() {
-  if (ui.update) return                       // already running — ignore double-trigger
-  // Pause network/audio so the install is clean, but keep the TUI alive
-  // so we can show progress and relaunch without quitting yapper.
+  // Exit TUI cleanly first, install in the foreground, then tell the user to
+  // run yapper again. Keeping the TUI alive while npm runs fights terminal-kit's
+  // fullscreen/alt-screen buffer and garbles the screen, so we tear down first.
   handlers.onDisconnect?.()
-  stopCaptureIfAny()
-
-  ui.update = { phase: 'downloading', lines: [], code: null, rect: null }
-  ui.dirty = true
+  clearInterval(ui.loopTimer)
+  term.grabInput(false)
+  term.styleReset()
+  term.clear()
+  term.fullscreen(false)
+  process.stdout.write('\x1b[?25h')   // show cursor (terminal-kit compat)
 
   const { spawn } = await import('child_process')
+  console.log('\n' + '─'.repeat(40))
+  console.log('  yapper — updating to latest...\n')
+
   const child = spawn('npm', ['install', '-g', 'https://github.com/sadad1213/yapper/archive/refs/heads/main.tar.gz'], {
-    stdio: ['ignore', 'pipe', 'pipe'], shell: true,
+    stdio: 'inherit',
+    shell: true,
   })
-  const push = (b) => {
-    for (const line of b.toString().split(/\r?\n/)) {
-      if (!line) continue
-      const u = ui.update; if (!u) continue
-      u.lines.push(line)
-      if (u.lines.length > 8) u.lines.shift()
-      ui.dirty = true
-    }
-  }
-  child.stdout?.on('data', push)
-  child.stderr?.on('data', push)
-  child.on('error', () => { if (ui.update) { ui.update.phase = 'failed'; ui.update.code = -1; ui.dirty = true } })
+
   child.on('close', (code) => {
-    if (!ui.update) return
-    ui.update.phase = code === 0 ? 'done' : 'failed'
-    ui.update.code = code
-    if (code === 0) clearPendingUpdate()
-    ui.dirty = true
+    console.log('\n' + '─'.repeat(40))
+    if (code === 0) {
+      console.log('  ✓ Update complete! Run yapper again.')
+      clearPendingUpdate()
+    } else {
+      console.log('  ✗ Update failed (code ' + code + '). Try manually:')
+      console.log('    npm install -g https://github.com/sadad1213/yapper/archive/refs/heads/main.tar.gz')
+    }
+    process.exit(code ?? 1)
   })
-}
-
-function stopCaptureIfAny() {
-  try { const a = audioApi; a?.stopCapture?.() } catch {}
-}
-
-async function relaunchYapper() {
-  // Re-exec ourselves in the same terminal: argv[0]=node, argv[1..]=script+args.
-  // The just-finished `npm i -g` rewrote the script on disk, so the child runs
-  // the NEW code. stdio inherited keeps us in this terminal.
-  const { spawn } = await import('child_process')
-  const child = spawn(process.argv[0], process.argv.slice(1), { stdio: 'inherit', shell: false })
-  child.on('spawn', () => process.exit(0))
-  child.on('error', () => process.exit(1))
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────
@@ -930,8 +836,6 @@ export function registerAudio(api) { audioApi = api }
 function loop() {
   state.selfLevel = Math.max(0, state.selfLevel - 0.06)   // smooth release
   const animating = state.talking.size > 0 || ui.modal?.testing || state.selfLevel > 0.01
-  // The update spinner + streaming npm log lines need a redraw every tick.
-  if (ui.update?.phase === 'downloading') ui.dirty = true
   if (ui.dirty || animating) { drawAll(); ui.dirty = false }
 }
 
