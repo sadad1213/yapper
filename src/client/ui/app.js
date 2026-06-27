@@ -174,18 +174,19 @@ function drawRooms() {
   ui.roomItems = []
   state.rooms.forEach((r, idx) => {
     ui.roomItems.push({ type: 'room', name: r.name, idx })
-    if (r.name === state.currentRoom) {
-      // Members under the expanded room: self first (so "you" is visible in the
-      // sidebar too), then everyone else — mirroring the right-panel ordering.
-      const members = (r.users || []).slice()
-      const selfIdx = members.findIndex(u => u.id === state.userId)
-      let selfName = state.username
-      if (selfIdx >= 0) { selfName = members[selfIdx].name || selfName; members.splice(selfIdx, 1) }
+    // Members shown under every room — not just the current one, so you can see
+    // who's in any room while sitting elsewhere. Self is prepended only to the
+    // room we're actually in (selfIdx >= 0); other rooms just list their users.
+    const members = (r.users || []).slice()
+    const selfIdx = members.findIndex(u => u.id === state.userId)
+    if (selfIdx >= 0) {
+      const selfName = members[selfIdx].name || state.username
+      members.splice(selfIdx, 1)
       members.unshift({ id: state.userId, name: selfName, self: true, muted: state.muted })
-      members.forEach((u, i) => {
-        ui.roomItems.push({ type: 'user', username: u.name, userId: u.id, self: !!u.self, roomIdx: idx, last: i === members.length - 1 })
-      })
     }
+    members.forEach((u, i) => {
+      ui.roomItems.push({ type: 'user', username: u.name, userId: u.id, self: !!u.self, roomIdx: idx, last: i === members.length - 1 })
+    })
   })
   ui.roomItems.push({ type: 'newRoom' })
 

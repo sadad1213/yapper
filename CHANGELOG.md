@@ -6,6 +6,19 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.1.20
+
+### Русский
+- В левом сайдбаре участники теперь показываются под каждой комнатой, а не
+  только под той, в которой вы находитесь. Можно смотреть, кто сидит в music
+  или gaming, сидя при этом в general. Себя с пометкой «(you)» видно только в
+  текущей комнате.
+
+### English
+- The left sidebar now shows participants under every room, not just the
+  one you're in. You can see who's in music or gaming while sitting in
+  general. Yourself ("(you)") only appears in your current room.
+
 ## 0.1.19
 
 ### Русский
