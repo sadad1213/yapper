@@ -9,7 +9,7 @@ const term = termkit.terminal
 const config = new Conf({ projectName: 'yapper' })
 
 const require = createRequire(import.meta.url)
-const VERSION = require('../../package.json').version
+const VERSION = require('../../../package.json').version
 
 const LEFT_W = 22            // inner width of the left (rooms) panel
 
