@@ -1,11 +1,18 @@
 import termkit from 'terminal-kit'
 import Conf from 'conf'
+import { getThreshold, setThreshold } from '../audio/vad.js'
 
 const term = termkit.terminal
 const config = new Conf({ projectName: 'yapper' })
 
 const VERSION = '0.1.0'
 const LEFT_W = 22            // inner width of the left (rooms) panel
+
+const THRESHOLD_PRESETS = [
+  { value: 100, label: 'Quiet (100)' },
+  { value: 200, label: 'Normal (200)' },
+  { value: 400, label: 'Loud (400)' },
+]
 
 // ─── State ─────────────────────────────────────────────────────────────────
 export const state = {
@@ -232,7 +239,7 @@ function drawStatus() {
 function drawModal() {
   const { W, H } = L()
   const m = ui.modal
-  const bw = Math.min(54, W - 4), bh = 12
+  const bw = Math.min(54, W - 4), bh = 14
   const bx = Math.floor((W - bw) / 2), by = Math.floor((H - bh) / 2)
   m.rect = { bx, by, bw, bh }
   const C = { color: 'cyan' }
@@ -247,7 +254,7 @@ function drawModal() {
   putStr(bx + 2, by, ' settings ', { color: 'cyan', bold: true })
 
   const ix = bx + 2, rw = bw - 4
-  m.rowsY = [by + 2, by + 4, by + 6, by + 10]
+  m.rowsY = [by + 2, by + 4, by + 6, by + 8, by + 12]
 
   const uval = (m.editing && m.row === 0) ? m.edit + '█' : state.username
   modalField(ix, by + 2, rw, 'username', uval, m.row === 0)
@@ -260,8 +267,11 @@ function drawModal() {
   if (m.testing)        putStr(ix + 1, by + 7, bar(m.testLevel || 0, rw - 2), levelAttr(m.testLevel || 0))
   else if (m.testError) putStr(ix + 1, by + 7, 'audio backend not available', { color: 'red', dim: true })
 
-  putStr(ix + 1, by + 8, '↑↓ move · enter select · ‹ › device · esc close', { dim: true })
-  modalField(ix, by + 10, rw, '', '[ close ]', m.row === 3)
+  const thr = THRESHOLD_PRESETS[m.thresholdIdx]?.label || 'Normal (200)'
+  modalField(ix, by + 8, rw, 'sensitivity', '‹ ' + thr + ' ›', m.row === 3)
+
+  putStr(ix + 1, by + 10, '↑↓ move · enter select · ‹ › adjust · esc close', { dim: true })
+  modalField(ix, by + 12, rw, '', '[ close ]', m.row === 4)
 }
 
 function modalField(ix, y, rw, label, value, sel) {
@@ -323,10 +333,10 @@ function handleModalKey(name, data) {
     return
   }
   switch (name) {
-    case 'UP':    m.row = (m.row + 3) % 4; ui.dirty = true; break
-    case 'DOWN':  m.row = (m.row + 1) % 4; ui.dirty = true; break
-    case 'LEFT':  if (m.row === 1) cycleDevice(-1); break
-    case 'RIGHT': if (m.row === 1) cycleDevice(1); break
+    case 'UP':    m.row = (m.row + 4) % 5; ui.dirty = true; break
+    case 'DOWN':  m.row = (m.row + 1) % 5; ui.dirty = true; break
+    case 'LEFT':  if (m.row === 1) cycleDevice(-1); else if (m.row === 3) cycleThreshold(-1); break
+    case 'RIGHT': if (m.row === 1) cycleDevice(1); else if (m.row === 3) cycleThreshold(1); break
     case 'ENTER': modalActivate(); break
     case 's': case 'S': case 'q': case 'Q': case 'ESCAPE': closeSettings(); break
   }
@@ -424,7 +434,9 @@ function promptNewRoom() {
 // ─── Settings modal ───────────────────────────────────────────────────────────
 function openSettings() {
   const devices = audioApi?.getInputDevices ? audioApi.getInputDevices() : [{ id: -1, name: 'default' }]
-  ui.modal = { row: 0, editing: false, edit: '', devices, devIdx: 0, testing: false, testLevel: 0, testError: false }
+  const savedThreshold = config.get('vadThreshold', 200)
+  const presetIdx = THRESHOLD_PRESETS.findIndex(p => p.value === savedThreshold)
+  ui.modal = { row: 0, editing: false, edit: '', devices, devIdx: 0, testing: false, testLevel: 0, testError: false, thresholdIdx: presetIdx >= 0 ? presetIdx : 1 }
   ui.dirty = true
 }
 
@@ -439,7 +451,8 @@ function modalActivate() {
   if (m.row === 0)      { m.editing = true; m.edit = state.username; ui.dirty = true }
   else if (m.row === 1) cycleDevice(1)
   else if (m.row === 2) toggleMicTest()
-  else if (m.row === 3) closeSettings()
+  else if (m.row === 3) cycleThreshold(1)
+  else if (m.row === 4) closeSettings()
 }
 
 function cycleDevice(dir) {
@@ -454,6 +467,15 @@ function cycleDevice(dir) {
 function toggleMicTest() {
   if (ui.modal.testing) stopMicTest()
   else startMicTestInternal()
+}
+
+function cycleThreshold(dir) {
+  const m = ui.modal
+  m.thresholdIdx = (m.thresholdIdx + dir + THRESHOLD_PRESETS.length) % THRESHOLD_PRESETS.length
+  const val = THRESHOLD_PRESETS[m.thresholdIdx].value
+  config.set('vadThreshold', val)
+  setThreshold(val)
+  ui.dirty = true
 }
 
 function startMicTestInternal() {
@@ -503,6 +525,7 @@ function loop() {
 
 export function startUI() {
   config.set('username', state.username)
+  setThreshold(config.get('vadThreshold', 200))
   term.fullscreen(true)
   term.hideCursor()
   term.grabInput({ mouse: 'button' })

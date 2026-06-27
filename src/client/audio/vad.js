@@ -1,4 +1,7 @@
-const SILENCE_THRESHOLD = 200  // linear RMS below this is treated as silence (lower = more sensitive)
+let _threshold = 200  // linear RMS below this is treated as silence (lower = more sensitive)
+
+export function getThreshold() { return _threshold }
+export function setThreshold(v) { _threshold = v }
 
 export function rawRms(pcmBuffer) {
   let sumSq = 0
@@ -11,7 +14,7 @@ export function rawRms(pcmBuffer) {
 }
 
 export function isSilent(pcmBuffer) {
-  return rawRms(pcmBuffer) < SILENCE_THRESHOLD
+  return rawRms(pcmBuffer) < _threshold
 }
 
 // Normalised 0..1 level on a dB scale, nice for a VU meter.
