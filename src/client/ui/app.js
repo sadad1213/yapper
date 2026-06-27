@@ -175,18 +175,25 @@ function drawUsers() {
 
   const room = state.rooms.find(r => r.name === state.currentRoom)
   const others = (room?.users ?? []).filter(u => u.id !== state.userId)
+
+  // Participant list — self sits at the top, right among everyone else.
   let y = firstRow
+  drawUserRow(y++, state.username + ' (you)', {
+    self: true, muted: state.muted,
+    talking: !state.muted && state.selfLevel > 0.05,
+  })
   for (const u of others) {
     if (y > lastRow - 1) break
-    drawUserRow(y, u.name, { talking: state.talking.has(u.id), muted: u.muted, seed: u.id })
-    y++
+    drawUserRow(y++, u.name, { talking: state.talking.has(u.id), muted: u.muted, seed: u.id })
   }
 
-  // self pinned to the last content row
-  drawUserRow(lastRow, state.username + ' (you)', {
-    talking: !state.muted && state.selfLevel > 0.05,
-    muted: state.muted, self: true, level: state.selfLevel,
-  })
+  // Dedicated mic-level bar pinned at the bottom of the panel.
+  const label = state.muted ? 'your mic · muted' : 'your mic'
+  putStr(rightX, lastRow, label, state.muted ? { color: 'red', dim: true } : { dim: true })
+  const meterX = rightX + 17
+  const meterW = Math.max(8, rightW - 19)
+  const lvl = state.muted ? 0 : state.selfLevel
+  putStr(meterX, lastRow, bar(lvl, meterW), levelAttr(lvl))
 }
 
 function drawUserRow(y, name, o) {
@@ -195,15 +202,15 @@ function drawUserRow(y, name, o) {
   const iconAttr = o.muted ? { color: 'red' } : (o.talking ? { color: 'green', bold: true } : { dim: true })
   putStr(rightX, y, icon, iconAttr)
 
-  const nameAttr = o.self ? { color: 'cyan' } : (o.talking ? { bold: true } : {})
+  const nameAttr = o.self ? { color: 'cyan', bold: true } : (o.talking ? { bold: true } : {})
   putStr(rightX + 2, y, padEnd(name, 16), nameAttr)
 
-  const meterX = rightX + 19
+  const statusX = rightX + 19
   const meterW = Math.max(6, Math.min(14, rightW - 21))
-  if (o.muted)        putStr(meterX, y, 'muted', { color: 'red', dim: true })
-  else if (o.self)    putStr(meterX, y, bar(o.level || 0, meterW), levelAttr(o.level || 0))
-  else if (o.talking) putStr(meterX, y, animBars(o.seed || 1, meterW), { color: 'green' })
-  else                putStr(meterX, y, 'idle', { dim: true })
+  if (o.muted)        putStr(statusX, y, 'muted', { color: 'red', dim: true })
+  else if (o.self)    putStr(statusX, y, o.talking ? 'speaking' : 'idle', { color: 'cyan', dim: !o.talking })
+  else if (o.talking) putStr(statusX, y, animBars(o.seed || 1, meterW), { color: 'green' })
+  else                putStr(statusX, y, 'idle', { dim: true })
 }
 
 function drawStatus() {

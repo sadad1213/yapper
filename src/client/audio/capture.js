@@ -39,7 +39,9 @@ export class Capture extends EventEmitter {
       if (!isSilent(frame)) {
         try {
           const encoded = this.encoder.encode(frame, FRAME_SIZE)
-          this.emit('frame', Buffer.from(encoded.buffer))
+          // Buffer.from(encoded) copies exactly the packet bytes; encoded.buffer
+          // would be opusscript's whole multi-KB internal buffer (corrupt frame).
+          this.emit('frame', Buffer.from(encoded))
         } catch {}
       }
     }

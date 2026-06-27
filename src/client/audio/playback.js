@@ -36,7 +36,7 @@ export function queueFrame(userId, opusData) {
   if (!decoder) return
   try {
     const pcm = decoder.decode(Buffer.from(opusData), FRAME_SIZE)
-    const buf = Buffer.from(pcm.buffer)
+    const buf = Buffer.from(pcm)   // copy exact PCM bytes, not the whole internal buffer
     if (!queues.has(userId)) queues.set(userId, [])
     const q = queues.get(userId)
     // Drop if too far behind to avoid audio delay buildup

@@ -9,6 +9,7 @@ export const audioEvents = new EventEmitter()
 
 let backend = null          // 'naudiodon' | 'sox' | null
 let naudio = null           // naudiodon module namespace (if loaded)
+let soxMod = null           // ./sox.js module (if loaded)
 let encoder = null, decoder = null
 let captureInstance = null
 let outStream = null
@@ -43,6 +44,13 @@ function attachCapture(inStream) {
   captureInstance.on('level', l => audioEvents.emit('level', l))
 }
 
+// Build an input stream for the current backend at the given device id.
+function makeInput(deviceId) {
+  if (backend === 'naudiodon') return buildNdInput(deviceId)
+  if (backend === 'sox')       return new soxMod.SoxCapture(deviceId < 0 ? 0 : deviceId)
+  return null
+}
+
 // ─── Public API ────────────────────────────────────────────────────────────────
 export async function initAudio() {
   await loadOpus()
@@ -60,10 +68,10 @@ export async function initAudio() {
   // Fall back to SoX
   if (hasSox()) {
     backend = 'sox'
-    const { SoxCapture, SoxPlayback } = await import('./sox.js')
-    outStream = new SoxPlayback()
+    soxMod = await import('./sox.js')
+    outStream = new soxMod.SoxPlayback()
     initPlayback(decoder, outStream)
-    attachCapture(new SoxCapture())
+    attachCapture(new soxMod.SoxCapture(selectedInputId < 0 ? 0 : selectedInputId))
     return { available: true, queueFrame, backend }
   }
 
@@ -84,16 +92,24 @@ export function getInputDevices() {
       return inputs.length ? inputs : [{ id: -1, name: 'Default' }]
     } catch { return [{ id: -1, name: 'Default' }] }
   }
-  if (backend === 'sox') return [{ id: -1, name: 'System default (SoX)' }]
+  if (backend === 'sox') {
+    // SoX can't name devices, but waveaudio addresses them by index.
+    return [
+      { id: 0, name: 'Default mic (device 0)' },
+      { id: 1, name: 'Device 1' },
+      { id: 2, name: 'Device 2' },
+      { id: 3, name: 'Device 3' },
+    ]
+  }
   return [{ id: -1, name: 'No audio backend' }]
 }
 
 export function setInputDevice(id) {
   selectedInputId = id
-  if (backend !== 'naudiodon') return   // SoX uses the system default device
+  if (backend !== 'naudiodon' && backend !== 'sox') return
   const wasActive = captureInstance?.active
   try { captureInstance?.stop() } catch {}
-  attachCapture(buildNdInput(id))
+  attachCapture(makeInput(id))
   if (wasActive) captureInstance.start()
 }
 
