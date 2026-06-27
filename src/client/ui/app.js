@@ -19,7 +19,6 @@ const THRESHOLD_PRESETS = [
 export const state = {
   rooms: [],                 // [{ name, users: [{id, name, muted}] }]
   currentRoom: null,
-  selectedIdx: 0,
   username: String(config.get('username') || ('user' + (Math.floor(Math.random() * 9000) + 1000))),
   userId: null,
   muted: false,
@@ -44,6 +43,8 @@ const ui = {
   prompt: null,              // text-input overlay (new room)
   volumePopup: null,         // per-user volume overlay { userId, username, vol }
   userZones: [],             // clickable user rows [{ x0, x1, y, userId, username }]
+  roomItems: [],             // left-panel navigation [{ type:'room'|'user'|'newRoom', ... }]
+  selectedLine: 0,           // index into roomItems
   statusZones: [],           // clickable status-bar segments
 }
 
@@ -154,26 +155,58 @@ function drawFrame() {
 
 function drawRooms() {
   const { firstRow, lastRow } = L()
-  const newRow = lastRow
-  let y = firstRow
 
+  // Build flat navigation list from rooms + expanded members
+  ui.roomItems = []
   state.rooms.forEach((r, idx) => {
-    if (y >= newRow) return
-    const cur = state.currentRoom === r.name
-    const sel = state.selectedIdx === idx && !ui.modal && !ui.prompt
-    const icon = cur ? '▸' : ' '
-    const count = String(r.users.length)
-    const label = `${icon} ${r.name}`
-    const line = padEnd(label, LEFT_W - 1 - count.length) + count
-    const attr = sel ? { bgColor: 'cyan', color: 'black' }
-               : cur ? { color: 'green', bold: true } : {}
-    putStr(1, y, padEnd(line, LEFT_W), attr)
-    y++
+    ui.roomItems.push({ type: 'room', name: r.name, idx })
+    if (r.name === state.currentRoom) {
+      const others = (r.users || []).filter(u => u.id !== state.userId)
+      others.forEach((u, i) => {
+        ui.roomItems.push({ type: 'user', username: u.name, userId: u.id, roomIdx: idx, last: i === others.length - 1 })
+      })
+    }
   })
+  ui.roomItems.push({ type: 'newRoom' })
 
-  // + new room
-  const sel = state.selectedIdx === state.rooms.length && !ui.modal && !ui.prompt
-  putStr(1, newRow, padEnd('+ new room', LEFT_W), sel ? { bgColor: 'cyan', color: 'black' } : { dim: true })
+  // Clamp selection
+  if (ui.selectedLine >= ui.roomItems.length) ui.selectedLine = Math.max(0, ui.roomItems.length - 1)
+
+  // Auto-select current room header when room changes
+  if (state.currentRoom && state.currentRoom !== ui._lastRoom) {
+    ui._lastRoom = state.currentRoom
+    const ri = ui.roomItems.findIndex(it => it.type === 'room' && it.name === state.currentRoom)
+    if (ri >= 0) ui.selectedLine = ri
+  } else if (!state.currentRoom) {
+    ui._lastRoom = null
+  }
+
+  let y = firstRow
+  for (let i = 0; i < ui.roomItems.length; i++) {
+    if (y > lastRow) break
+    const item = ui.roomItems[i]
+    const sel = i === ui.selectedLine && !ui.modal && !ui.prompt && !ui.volumePopup
+
+    if (item.type === 'room') {
+      const cur = item.name === state.currentRoom
+      const room = state.rooms[item.idx]
+      const count = String(room?.users?.length || 0)
+      const icon = cur ? '▸' : ' '
+      const label = `${icon} ${item.name}`
+      const line = padEnd(label, LEFT_W - 1 - count.length) + count
+      const attr = sel ? { bgColor: 'cyan', color: 'black' }
+                 : cur ? { color: 'green', bold: true } : {}
+      putStr(1, y, padEnd(line, LEFT_W), attr)
+    } else if (item.type === 'user') {
+      const branch = item.last ? '  └─ ' : '  ├─ '
+      const line = branch + item.username
+      const attr = sel ? { bgColor: 'cyan', color: 'black' } : { dim: true }
+      putStr(1, y, padEnd(line, LEFT_W), attr)
+    } else if (item.type === 'newRoom') {
+      putStr(1, y, padEnd('+ new room', LEFT_W), sel ? { bgColor: 'cyan', color: 'black' } : { dim: true })
+    }
+    y++
+  }
 }
 
 function drawUsers() {
@@ -409,12 +442,11 @@ function handleMouse(name, data) {
   }
 
   if (x >= 1 && x < divX && y >= firstRow && y <= lastRow) {
-    if (y === lastRow) { state.selectedIdx = state.rooms.length; promptNewRoom() }
-    else {
-      const idx = y - firstRow
-      if (idx >= 0 && idx < state.rooms.length) { state.selectedIdx = idx; joinRoom(state.rooms[idx].name) }
+    const idx = y - firstRow
+    if (idx >= 0 && idx < ui.roomItems.length) {
+      ui.selectedLine = idx
+      activateSelection()
     }
-    ui.dirty = true
     return
   }
 
@@ -440,14 +472,18 @@ function handleModalMouse(name, x, y) {
 
 // ─── Actions ───────────────────────────────────────────────────────────────
 function move(d) {
-  const total = state.rooms.length + 1
-  state.selectedIdx = (state.selectedIdx + d + total) % total
+  const n = ui.roomItems.length
+  if (n === 0) return
+  ui.selectedLine = (ui.selectedLine + d + n) % n
   ui.dirty = true
 }
 
 function activateSelection() {
-  if (state.selectedIdx === state.rooms.length) promptNewRoom()
-  else if (state.rooms[state.selectedIdx]) joinRoom(state.rooms[state.selectedIdx].name)
+  const item = ui.roomItems[ui.selectedLine]
+  if (!item) return
+  if (item.type === 'room')      joinRoom(item.name)
+  else if (item.type === 'user') openVolumePopup(item.userId, item.username)
+  else if (item.type === 'newRoom') promptNewRoom()
 }
 
 function joinRoom(name) {
@@ -503,7 +539,7 @@ function promptNewRoom() {
         if (!state.rooms.find(r => r.name === name)) state.rooms.push({ name, users: [] })
         state.currentRoom = name
       }
-      state.selectedIdx = Math.max(0, state.rooms.findIndex(r => r.name === name))
+      // Selection will clamp on next drawRooms rebuild
     },
   }
   ui.dirty = true
