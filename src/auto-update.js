@@ -5,6 +5,7 @@ import Conf from 'conf'
 
 const config = new Conf({ projectName: 'yapper' })
 const API_URL = 'https://api.github.com/repos/sadad1213/yapper/contents/package.json?ref=main'
+const CHANGELOG_URL = 'https://api.github.com/repos/sadad1213/yapper/contents/CHANGELOG.md?ref=main'
 
 let _checked = false
 let _currentVersion = null
@@ -67,4 +68,39 @@ export function getPendingUpdate() {
 
 export function clearPendingUpdate() {
   config.delete('updateAvailable')
+}
+
+// Fetch the CHANGELOG.md section for the given version (e.g. '0.1.16' or 'v0.1.16').
+// Each version lives under a `## <version>` heading; the content is everything
+// until the next `## ` heading. RU block first, EN block second — in file order.
+// Returns an array of raw lines, or null if unavailable / version not found.
+export async function fetchChangelog(version) {
+  const want = String(version || '').replace(/^v/, '').trim()
+  if (!want) return null
+  try {
+    const res = await fetch(CHANGELOG_URL, {
+      headers: { 'User-Agent': 'yapper', 'Accept': 'application/vnd.github.v3+json' },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    const md = Buffer.from(data.content, 'base64').toString('utf8')
+    const lines = md.split('\n')
+    let start = -1
+    for (let i = 0; i < lines.length; i++) {
+      const m = /^##\s+([0-9][\w.\-]*)/.exec(lines[i])
+      if (m && m[1].replace(/^v/, '') === want) { start = i + 1; break }
+    }
+    if (start < 0) return null
+    const section = []
+    for (let i = start; i < lines.length; i++) {
+      if (/^##\s+/.test(lines[i])) break
+      section.push(lines[i])
+    }
+    while (section.length && !section[0].trim()) section.shift()
+    while (section.length && !section[section.length - 1].trim()) section.pop()
+    return section.length ? section : null
+  } catch {
+    return null
+  }
 }

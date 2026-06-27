@@ -3,7 +3,7 @@ import Conf from 'conf'
 import { createRequire } from 'module'
 import { getThreshold, setThreshold } from '../audio/vad.js'
 import { getUserVolume, setUserVolume } from '../audio/playback.js'
-import { checkForUpdate, clearPendingUpdate } from '../../auto-update.js'
+import { checkForUpdate, clearPendingUpdate, fetchChangelog } from '../../auto-update.js'
 
 const term = termkit.terminal
 const config = new Conf({ projectName: 'yapper' })
@@ -37,7 +37,10 @@ export const handlers = {
 }
 
 let audioApi = null          // injected via registerAudio()
-let updateAvailable = false  // set by checkForUpdate() after startup
+let updateAvailable = false  // set by checkForUpdate() after startup — remote version is newer
+let pendingVersion = null    // the remote version string when updateAvailable
+const SEEN_KEY = 'lastSeenVersion'
+let whatsNew = false          // local VERSION differs from last seen — show "what's new" changelog
 
 // ─── UI runtime ──────────────────────────────────────────────────────────────
 const ui = {
@@ -47,6 +50,7 @@ const ui = {
   modal: null,               // settings overlay
   prompt: null,              // text-input overlay (new room)
   volumePopup: null,         // per-user volume overlay { userId, username, vol }
+  changelog: null,           // changelog overlay { title, rawLines, lines, scroll, rect }
   userZones: [],             // clickable user rows [{ x0, x1, y, userId, username }]
   roomItems: [],             // left-panel navigation [{ type:'room'|'user'|'newRoom', ... }]
   selectedLine: 0,           // index into roomItems
@@ -118,6 +122,7 @@ function drawAll() {
   if (ui.modal) drawModal()
   if (ui.prompt) drawPrompt()
   if (ui.volumePopup) drawVolumePopup()
+  if (ui.changelog) drawChangelog()
   sb.draw({ delta: true })
 }
 
@@ -278,6 +283,7 @@ function drawStatus() {
   seg('[N] new room', promptNewRoom)
   seg('[S] settings', openSettings)
   if (updateAvailable) seg('[U] update!', runUpdate, { color: 'yellow', bold: true })
+  if (updateAvailable || whatsNew) seg('[C] changelog', openChangelog, { color: 'cyan', bold: whatsNew })
   seg('[Q] quit', quit)
 
   // Version in the bottom-right corner
@@ -372,10 +378,98 @@ function drawVolumePopup() {
   putStr(bx + 2, by + bh - 2, ' ← → adjust · esc close ', { dim: true })
 }
 
+// ─── Changelog overlay ───────────────────────────────────────────────────────
+function changelogBox() {
+  const { W, H } = L()
+  const bw = Math.min(64, W - 4)
+  const bh = Math.max(8, Math.min(22, H - 4))
+  const bx = Math.floor((W - bw) / 2)
+  const by = Math.floor((H - bh) / 2)
+  return { W, H, bw, bh, bx, by }
+}
+
+// Re-wrap raw lines to fit the changelog box inner width. Called on open and on resize.
+function wrapChangelog() {
+  const cl = ui.changelog
+  if (!cl) return
+  const { bw } = changelogBox()
+  const cap = Math.max(8, bw - 4)
+  cl.lines = []
+  for (const raw of cl.rawLines || []) {
+    if (!raw) { cl.lines.push(''); continue }
+    for (let i = 0; i < raw.length; i += cap) cl.lines.push(raw.slice(i, i + cap))
+  }
+  const innerH = (cl.rect?.bh || 18) - 4
+  if (cl.scroll > Math.max(0, cl.lines.length - innerH)) cl.scroll = 0
+  ui.dirty = true
+}
+
+function drawChangelog() {
+  const { bw, bh, bx, by } = changelogBox()
+  const cl = ui.changelog
+  cl.rect = { bx, by, bw, bh }
+  const C = { color: 'cyan' }
+  putStr(bx, by, '╭' + '─'.repeat(bw - 2) + '╮', C)
+  for (let i = 1; i < bh - 1; i++) {
+    putStr(bx, by + i, '│', C)
+    putStr(bx + 1, by + i, ' '.repeat(bw - 2), {})
+    putStr(bx + bw - 1, by + i, '│', C)
+  }
+  putStr(bx, by + bh - 1, '╰' + '─'.repeat(bw - 2) + '╯', C)
+  putStr(bx + 2, by, ` changelog ${cl.title} `, { color: 'cyan', bold: true })
+
+  const innerH = bh - 4
+  const lines = cl.lines.length ? cl.lines : ['...']
+  const maxScroll = Math.max(0, lines.length - innerH)
+  if (cl.scroll > maxScroll) cl.scroll = maxScroll
+  if (cl.scroll < 0) cl.scroll = 0
+  const attrFor = (line) => /^#/.test(line) ? { color: 'cyan', bold: true } : {}
+  for (let i = 0; i < innerH; i++) {
+    const idx = cl.scroll + i
+    if (idx >= lines.length) break
+    putStr(bx + 2, by + 1 + i, padEnd(lines[idx], bw - 4), attrFor(lines[idx]))
+  }
+  if (lines.length > innerH) {
+    const info = ` ${cl.scroll + 1}-${Math.min(lines.length, cl.scroll + innerH)}/${lines.length} `
+    putStr(bx + 2, by + bh - 1, info, { dim: true })
+  }
+  const hint = ' ↑↓ scroll · esc close '
+  putStr(bx + bw - hint.length - 1, by + bh - 1, hint, { dim: true })
+}
+
+function handleChangelogKey(name) {
+  const cl = ui.changelog
+  if (!cl) return
+  const innerH = (cl.rect?.bh || 18) - 4
+  const maxScroll = Math.max(0, (cl.lines?.length || 0) - innerH)
+  if (name === 'ESCAPE' || name === 'q' || name === 'Q' || name === 'c' || name === 'C' || name === 'ENTER') {
+    ui.changelog = null; ui.dirty = true
+  } else if (name === 'UP')        { cl.scroll = Math.max(0, cl.scroll - 1); ui.dirty = true }
+    else if (name === 'DOWN')      { cl.scroll = Math.min(maxScroll, cl.scroll + 1); ui.dirty = true }
+    else if (name === 'PAGE_UP')   { cl.scroll = Math.max(0, cl.scroll - innerH); ui.dirty = true }
+    else if (name === 'PAGE_DOWN') { cl.scroll = Math.min(maxScroll, cl.scroll + innerH); ui.dirty = true }
+    else if (name === 'HOME')      { cl.scroll = 0; ui.dirty = true }
+    else if (name === 'END')       { cl.scroll = maxScroll; ui.dirty = true }
+}
+
+function handleChangelogMouse(name, x, y) {
+  const cl = ui.changelog
+  if (!cl) return
+  const innerH = (cl.rect?.bh || 18) - 4
+  const maxScroll = Math.max(0, (cl.lines?.length || 0) - innerH)
+  if (name === 'MOUSE_WHEEL_UP')   { cl.scroll = Math.max(0, cl.scroll - 2); ui.dirty = true; return }
+  if (name === 'MOUSE_WHEEL_DOWN') { cl.scroll = Math.min(maxScroll, cl.scroll + 2); ui.dirty = true; return }
+  if (name === 'MOUSE_LEFT_BUTTON_PRESSED') {
+    const r = cl.rect
+    if (!r || x < r.bx || x > r.bx + r.bw - 1 || y < r.by || y > r.by + r.bh - 1) { ui.changelog = null; ui.dirty = true }
+  }
+}
+
 // ─── Input: keyboard ──────────────────────────────────────────────────────────
 function handleKey(name, matches, data) {
   if (name === 'CTRL_C') return quit()
   if (ui.volumePopup) return handleVolumeKey(name)
+  if (ui.changelog) return handleChangelogKey(name)
   if (ui.prompt) return handlePromptKey(name, data)
   if (ui.modal)  return handleModalKey(name, data)
 
@@ -387,6 +481,7 @@ function handleKey(name, matches, data) {
     case 'm': case 'M': toggleMute(); break
     case 's': case 'S': openSettings(); break
     case 'n': case 'N': promptNewRoom(); break
+    case 'c': case 'C': if (updateAvailable || whatsNew) openChangelog(); break
     case 'u': case 'U': if (updateAvailable) runUpdate(); break
     case 'q': case 'Q': quit(); break
   }
@@ -435,6 +530,7 @@ function handleMouse(name, data) {
     if (name === 'MOUSE_LEFT_BUTTON_PRESSED') closeVolumePopup()
     return
   }
+  if (ui.changelog) return handleChangelogMouse(name, x, y)
   if (ui.prompt) {              // click anywhere outside closes the prompt
     return
   }
@@ -620,6 +716,21 @@ function stopMicTest() {
   ui.dirty = true
 }
 
+async function openChangelog() {
+  // Prefer the pending-update version's changelog; otherwise show "what's new"
+  // for the local version after an upgrade.
+  const version = updateAvailable ? pendingVersion : VERSION
+  ui.changelog = { title: version ? `v${version}` : 'changelog', rawLines: null, lines: [], scroll: 0, rect: null }
+  ui.dirty = true
+  const raw = await fetchChangelog(version)
+  if (!ui.changelog) return                       // closed while fetching
+  ui.changelog.rawLines = raw || ['(changelog unavailable)']
+  ui.changelog.scroll = 0
+  wrapChangelog()
+  // Mark this local version as seen — the "what's new" hint goes away
+  if (!updateAvailable) { config.set(SEEN_KEY, VERSION); whatsNew = false }
+}
+
 function quit() {
   handlers.onDisconnect?.()
   clearInterval(ui.loopTimer)
@@ -694,12 +805,18 @@ export function startUI() {
   term.on('resize', () => {
     ui.sb = makeScreen()
     term.clear()
+    if (ui.changelog) wrapChangelog()
     ui.dirty = true
   })
   ui.sb = makeScreen()
   ui.dirty = true
   ui.loopTimer = setInterval(loop, 50)
 
+  // Mark current version as "seen" on a fresh install so we don't advertise
+  // a changelog for the version you already have on first run.
+  if (!config.get(SEEN_KEY)) config.set(SEEN_KEY, VERSION)
+  whatsNew = config.get(SEEN_KEY) !== VERSION
+
   // Check for updates in the background
-  checkForUpdate().then(sha => { if (sha) { updateAvailable = true; ui.dirty = true } })
+  checkForUpdate().then(ver => { if (ver) { updateAvailable = true; pendingVersion = ver; ui.dirty = true } })
 }
