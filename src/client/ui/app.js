@@ -2,6 +2,7 @@ import termkit from 'terminal-kit'
 import Conf from 'conf'
 import { getThreshold, setThreshold } from '../audio/vad.js'
 import { getUserVolume, setUserVolume } from '../audio/playback.js'
+import { checkForUpdate, clearPendingUpdate } from '../../auto-update.js'
 
 const term = termkit.terminal
 const config = new Conf({ projectName: 'yapper' })
@@ -33,6 +34,7 @@ export const handlers = {
 }
 
 let audioApi = null          // injected via registerAudio()
+let updateAvailable = false  // set by checkForUpdate() after startup
 
 // ─── UI runtime ──────────────────────────────────────────────────────────────
 const ui = {
@@ -272,6 +274,7 @@ function drawStatus() {
   seg(state.muted ? '[M] unmute' : '[M] mute', toggleMute, state.muted ? { color: 'red', bold: true } : {})
   seg('[N] new room', promptNewRoom)
   seg('[S] settings', openSettings)
+  if (updateAvailable) seg('[U] update!', runUpdate, { color: 'yellow', bold: true })
   seg('[Q] quit', quit)
 }
 
@@ -375,6 +378,7 @@ function handleKey(name, matches, data) {
     case 'm': case 'M': toggleMute(); break
     case 's': case 'S': openSettings(); break
     case 'n': case 'N': promptNewRoom(); break
+    case 'u': case 'U': if (updateAvailable) runUpdate(); break
     case 'q': case 'Q': quit(); break
   }
 }
@@ -618,6 +622,38 @@ function quit() {
   process.exit(0)
 }
 
+async function runUpdate() {
+  // Exit TUI cleanly first
+  handlers.onDisconnect?.()
+  clearInterval(ui.loopTimer)
+  term.grabInput(false)
+  term.styleReset()
+  term.clear()
+  term.fullscreen(false)
+  term.showCursor()
+
+  const { spawn } = await import('child_process')
+  console.log('\n' + '─'.repeat(40))
+  console.log('  yapper — updating to latest...\n')
+
+  const child = spawn('npm', ['install', '-g', 'github:sadad1213/yapper'], {
+    stdio: 'inherit',
+    shell: true,
+  })
+
+  child.on('close', (code) => {
+    console.log('\n' + '─'.repeat(40))
+    if (code === 0) {
+      console.log('  ✓ Update complete! Run yapper again.')
+      clearPendingUpdate()
+    } else {
+      console.log('  ✗ Update failed (code ' + code + '). Try manually:')
+      console.log('    npm install -g github:sadad1213/yapper')
+    }
+    process.exit(code ?? 1)
+  })
+}
+
 // ─── Public API ────────────────────────────────────────────────────────────
 export function updateState(patch) { Object.assign(state, patch); ui.dirty = true }
 
@@ -654,4 +690,7 @@ export function startUI() {
   ui.sb = makeScreen()
   ui.dirty = true
   ui.loopTimer = setInterval(loop, 50)
+
+  // Check for updates in the background
+  checkForUpdate().then(sha => { if (sha) { updateAvailable = true; ui.dirty = true } })
 }
