@@ -175,9 +175,15 @@ function drawRooms() {
   state.rooms.forEach((r, idx) => {
     ui.roomItems.push({ type: 'room', name: r.name, idx })
     if (r.name === state.currentRoom) {
-      const others = (r.users || []).filter(u => u.id !== state.userId)
-      others.forEach((u, i) => {
-        ui.roomItems.push({ type: 'user', username: u.name, userId: u.id, roomIdx: idx, last: i === others.length - 1 })
+      // Members under the expanded room: self first (so "you" is visible in the
+      // sidebar too), then everyone else — mirroring the right-panel ordering.
+      const members = (r.users || []).slice()
+      const selfIdx = members.findIndex(u => u.id === state.userId)
+      let selfName = state.username
+      if (selfIdx >= 0) { selfName = members[selfIdx].name || selfName; members.splice(selfIdx, 1) }
+      members.unshift({ id: state.userId, name: selfName, self: true, muted: state.muted })
+      members.forEach((u, i) => {
+        ui.roomItems.push({ type: 'user', username: u.name, userId: u.id, self: !!u.self, roomIdx: idx, last: i === members.length - 1 })
       })
     }
   })
@@ -215,8 +221,11 @@ function drawRooms() {
       putStr(1, y, padEnd(line, LEFT_W), attr)
     } else if (item.type === 'user') {
       const branch = item.last ? '  └─ ' : '  ├─ '
-      const line = branch + item.username
-      const attr = sel ? { bgColor: 'cyan', color: 'black' } : { dim: true }
+      const name = item.self ? `${item.username} (you)` : item.username
+      const line = branch + name
+      const attr = sel ? { bgColor: 'cyan', color: 'black' }
+                 : item.self ? { color: 'green', bold: true }
+                 : { dim: true }
       putStr(1, y, padEnd(line, LEFT_W), attr)
     }
     y++
@@ -615,7 +624,7 @@ function activateSelection() {
   const item = ui.roomItems[ui.selectedLine]
   if (!item) return
   if (item.type === 'room')      joinRoom(item.name)
-  else if (item.type === 'user') openVolumePopup(item.userId, item.username)
+  else if (item.type === 'user') { if (!item.self) openVolumePopup(item.userId, item.username) }
   else if (item.type === 'newRoom') promptNewRoom()
 }
 

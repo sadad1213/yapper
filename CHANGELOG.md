@@ -6,6 +6,17 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.1.19
+
+### Русский
+- В левом сайдбаре под раскрытой текущей комнатой теперь отображаешься и ты
+  сам (с пометкой «(you)» и зелёным цветом), а не только другие участники.
+  Ты идёшь первым в списке.
+
+### English
+- The left sidebar now shows yourself under the expanded current room too
+  (marked "(you)" in green), not just other participants. You appear first.
+
 ## 0.1.18
 
 ### Русский
