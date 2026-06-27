@@ -1,12 +1,18 @@
 {
   "name": "yapper",
   "version": "0.1.0",
-  "description": "CLI voice chat for the terminal",
+  "description": "Fast, low-memory CLI voice chat for the terminal — serverless LAN, mouse-driven TUI",
   "type": "module",
   "bin": {
     "yapper": "./bin/yapper.js"
   },
   "main": "src/index.js",
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "start": "node bin/yapper.js",
     "server": "node bin/yapper.js server"
@@ -16,12 +22,30 @@
     "cli",
     "voice",
     "chat",
-    "terminal"
+    "terminal",
+    "tui",
+    "lan",
+    "opus"
   ],
+  "author": "sadad1213",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sadad1213/yapper.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sadad1213/yapper/issues"
+  },
+  "homepage": "https://github.com/sadad1213/yapper#readme",
+  "preferGlobal": true,
   "engines": {
     "node": ">=18.0.0"
   },
+  "os": [
+    "win32",
+    "linux",
+    "darwin"
+  ],
   "dependencies": {
     "conf": "^15.1.0",
     "opusscript": "^0.1.1",
