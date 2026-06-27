@@ -9,6 +9,17 @@ const SILENCE = Buffer.alloc(FRAME_BYTES)
 // userId → { frames: Buffer[], playing: boolean }
 const users = new Map()
 
+// Per-user volume multiplier (0..200, default 100). Persisted in config, survives restarts.
+const userVolumes = new Map()
+
+export function setUserVolume(userId, vol) {
+  userVolumes.set(userId, Math.max(0, Math.min(200, Math.round(vol))))
+}
+
+export function getUserVolume(userId) {
+  return userVolumes.has(userId) ? userVolumes.get(userId) : 100
+}
+
 let outputStream = null
 let decoder = null
 let timer = null
@@ -65,12 +76,17 @@ function tick() {
 
 function writeFrame() {
   const active = []
-  for (const u of users.values()) {
+  for (const [userId, u] of users) {
     if (!u.playing) {
       if (u.frames.length >= JITTER_TARGET) u.playing = true   // pre-roll reached
       else continue                                            // still buffering → silent
     }
-    if (u.frames.length > 0) active.push(u.frames.shift())
+    if (u.frames.length > 0) {
+      let frame = u.frames.shift()
+      const vol = userVolumes.get(userId)
+      if (vol !== undefined && vol !== 100) frame = applyVolume(frame, vol)
+      active.push(frame)
+    }
     else u.playing = false                                     // underran → rebuffer before resuming
   }
 
@@ -78,6 +94,16 @@ function writeFrame() {
             : active.length === 1 ? active[0]
             : mix(active)
   outputStream.write(out)
+}
+
+function applyVolume(frame, vol) {
+  const factor = vol / 100
+  const result = Buffer.alloc(FRAME_BYTES)
+  for (let i = 0; i < FRAME_BYTES; i += 2) {
+    const s = Math.round(frame.readInt16LE(i) * factor)
+    result.writeInt16LE(Math.max(-32768, Math.min(32767, s)), i)
+  }
+  return result
 }
 
 function mix(buffers) {

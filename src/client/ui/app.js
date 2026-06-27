@@ -1,6 +1,7 @@
 import termkit from 'terminal-kit'
 import Conf from 'conf'
 import { getThreshold, setThreshold } from '../audio/vad.js'
+import { getUserVolume, setUserVolume } from '../audio/playback.js'
 
 const term = termkit.terminal
 const config = new Conf({ projectName: 'yapper' })
@@ -41,6 +42,8 @@ const ui = {
   loopTimer: null,
   modal: null,               // settings overlay
   prompt: null,              // text-input overlay (new room)
+  volumePopup: null,         // per-user volume overlay { userId, username, vol }
+  userZones: [],             // clickable user rows [{ x0, x1, y, userId, username }]
   statusZones: [],           // clickable status-bar segments
 }
 
@@ -108,6 +111,7 @@ function drawAll() {
   drawStatus()
   if (ui.modal) drawModal()
   if (ui.prompt) drawPrompt()
+  if (ui.volumePopup) drawVolumePopup()
   sb.draw({ delta: true })
 }
 
@@ -174,6 +178,7 @@ function drawRooms() {
 
 function drawUsers() {
   const { rightX, rightW, firstRow, lastRow } = L()
+  ui.userZones = []
 
   if (!state.currentRoom) {
     putStr(rightX, Math.floor((firstRow + lastRow) / 2), 'Select a room on the left and press Enter to join.', { dim: true })
@@ -191,7 +196,9 @@ function drawUsers() {
   })
   for (const u of others) {
     if (y > lastRow - 1) break
-    drawUserRow(y++, u.name, { talking: state.talking.has(u.id), muted: u.muted, seed: u.id })
+    drawUserRow(y, u.name, { talking: state.talking.has(u.id), muted: u.muted, seed: u.id })
+    ui.userZones.push({ x0: rightX, x1: rightX + rightW, y, userId: u.id, username: u.name })
+    y++
   }
 
   // Dedicated mic-level bar pinned at the bottom of the panel.
@@ -297,9 +304,34 @@ function drawPrompt() {
   putStr(bx + 2, by + bh - 1, ' enter ok · esc cancel ', { dim: true })
 }
 
+function drawVolumePopup() {
+  const { W, H } = L()
+  const v = ui.volumePopup
+  const bw = Math.min(42, W - 4), bh = 6
+  const bx = Math.floor((W - bw) / 2), by = Math.floor((H - bh) / 2)
+  const C = { color: 'cyan' }
+  putStr(bx, by, '╭' + '─'.repeat(bw - 2) + '╮', C)
+  for (let i = 1; i < bh - 1; i++) {
+    putStr(bx, by + i, '│', C)
+    putStr(bx + 1, by + i, ' '.repeat(bw - 2), {})
+    putStr(bx + bw - 1, by + i, '│', C)
+  }
+  putStr(bx, by + bh - 1, '╰' + '─'.repeat(bw - 2) + '╯', C)
+  putStr(bx + 2, by, ' volume: ' + v.username + ' ', { color: 'cyan', bold: true })
+
+  const barW = Math.min(30, bw - 12)
+  const barX = bx + Math.floor((bw - barW) / 2) - 1
+  const pct = Math.round(v.vol / 200 * 100)
+  putStr(barX, by + 2, '‹ ' + bar(v.vol / 200, barW) + ' ›', {})
+  const label = String(v.vol) + '%'
+  putStr(bx + Math.floor((bw - label.length) / 2), by + 3, label, { bold: true })
+  putStr(bx + 2, by + bh - 2, ' ← → adjust · esc close ', { dim: true })
+}
+
 // ─── Input: keyboard ──────────────────────────────────────────────────────────
 function handleKey(name, matches, data) {
   if (name === 'CTRL_C') return quit()
+  if (ui.volumePopup) return handleVolumeKey(name)
   if (ui.prompt) return handlePromptKey(name, data)
   if (ui.modal)  return handleModalKey(name, data)
 
@@ -320,6 +352,13 @@ function handlePromptKey(name, data) {
   else if (name === 'ESCAPE')    { ui.prompt = null; ui.dirty = true }
   else if (name === 'BACKSPACE') { p.value = p.value.slice(0, -1); ui.dirty = true }
   else if (data?.isCharacter)    { p.value += String.fromCodePoint(data.codepoint); ui.dirty = true }
+}
+
+function handleVolumeKey(name) {
+  const v = ui.volumePopup
+  if (name === 'LEFT')        { v.vol = Math.max(0, v.vol - 10); ui.dirty = true }
+  else if (name === 'RIGHT')  { v.vol = Math.min(200, v.vol + 10); ui.dirty = true }
+  else if (name === 'ESCAPE' || name === 'ENTER') closeVolumePopup()
 }
 
 function handleModalKey(name, data) {
@@ -346,6 +385,10 @@ function handleModalKey(name, data) {
 function handleMouse(name, data) {
   const x = data.x - 1, y = data.y - 1   // terminal is 1-based, buffer 0-based
 
+  if (ui.volumePopup) {         // click anywhere outside closes
+    if (name === 'MOUSE_LEFT_BUTTON_PRESSED') closeVolumePopup()
+    return
+  }
   if (ui.prompt) {              // click anywhere outside closes the prompt
     return
   }
@@ -356,6 +399,14 @@ function handleMouse(name, data) {
   if (name !== 'MOUSE_LEFT_BUTTON_PRESSED') return
 
   const { firstRow, lastRow, divX, statusRow } = L()
+
+  // Check clicks on user rows (volume popup)
+  for (const z of ui.userZones) {
+    if (x >= z.x0 && x <= z.x1 && y === z.y) {
+      openVolumePopup(z.userId, z.username)
+      return
+    }
+  }
 
   if (x >= 1 && x < divX && y >= firstRow && y <= lastRow) {
     if (y === lastRow) { state.selectedIdx = state.rooms.length; promptNewRoom() }
@@ -411,6 +462,33 @@ function toggleMute() {
   state.muted = !state.muted
   handlers.onMute?.(state.muted)
   ui.dirty = true
+}
+
+function openVolumePopup(userId, username) {
+  const vol = getUserVolume(userId)
+  ui.volumePopup = { userId, username, vol }
+  ui.dirty = true
+}
+
+function closeVolumePopup() {
+  const v = ui.volumePopup
+  if (v) {
+    setUserVolume(v.userId, v.vol)
+    const map = config.get('userVolumes', {})
+    map[String(v.userId)] = v.vol
+    config.set('userVolumes', map)
+  }
+  ui.volumePopup = null
+  ui.dirty = true
+}
+
+function loadVolumes() {
+  const saved = config.get('userVolumes', {})
+  if (saved && typeof saved === 'object') {
+    for (const [id, vol] of Object.entries(saved)) {
+      if (typeof vol === 'number') setUserVolume(Number(id), vol)
+    }
+  }
 }
 
 function promptNewRoom() {
@@ -526,6 +604,7 @@ function loop() {
 export function startUI() {
   config.set('username', state.username)
   setThreshold(config.get('vadThreshold', 200))
+  loadVolumes()
   term.fullscreen(true)
   term.hideCursor()
   term.grabInput({ mouse: 'button' })
