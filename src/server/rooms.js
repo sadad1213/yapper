@@ -3,7 +3,7 @@ import Conf from 'conf'
 
 const config = new Conf({ projectName: 'yapper' })
 
-const DEFAULTS = ['general', 'gaming', 'music']
+export const DEFAULTS = ['general', 'gaming', 'music']
 
 export const rooms = new Set(DEFAULTS)
 
@@ -23,4 +23,13 @@ export function addRoom(name) {
 
 export function hasRoom(name) {
   return rooms.has(name)
+}
+
+// Remove a custom room.  Default rooms are permanent and cannot be deleted.
+export function deleteRoom(name) {
+  if (DEFAULTS.includes(name)) return false
+  if (!rooms.has(name)) return false
+  rooms.delete(name)
+  persist()
+  return true
 }

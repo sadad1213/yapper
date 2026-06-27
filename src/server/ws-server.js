@@ -1,5 +1,5 @@
 import { WebSocketServer } from 'ws'
-import { rooms, addRoom } from './rooms.js'
+import { rooms, addRoom, deleteRoom, DEFAULTS } from './rooms.js'
 
 export const DEFAULT_PORT = 4747
 let nextId = 1
@@ -50,6 +50,20 @@ function handleSignal(ws, msg) {
     const name = String(msg.room).slice(0, 64)
     addRoom(name)
     broadcast({ type: 'rooms', list: roomList() })
+  } else if (msg.type === 'delete') {
+    const name = String(msg.room).slice(0, 64)
+    if (!DEFAULTS.includes(name) && rooms.has(name)) {
+      // Kick everyone still in the room about to disappear, then delete it.
+      // Each kicked client gets a `left` so its capture stops cleanly.
+      for (const [otherWs, other] of clients) {
+        if (other.room === name) {
+          other.room = null
+          send(otherWs, { type: 'left' })
+        }
+      }
+      deleteRoom(name)
+      broadcast({ type: 'rooms', list: roomList() })
+    }
   } else if (msg.type === 'mute') {
     client.muted = !!msg.muted
     broadcast({ type: 'user_mute', userId: client.id, muted: client.muted })

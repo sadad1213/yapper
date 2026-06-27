@@ -6,6 +6,22 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.1
+
+### Русский
+- Удаление кастомных комнат. Кнопка [D] delete в статус-баре появляется, когда
+  выбрана не дефолтная комната; Enter подтверждает, ESC отменяет. Дефолтные
+  (general, gaming, music) удалить нельзя — сервер их отклоняет. При удалении
+  комнаты все, кто в ней находились, автоматически из неё выходят (им
+  приходит `left`, микрофон останавливается).
+
+### English
+- Deleting custom rooms. A [D] delete button appears in the status bar when a
+  non-default room is selected; Enter confirms, ESC cancels. Default rooms
+  (general, gaming, music) can't be deleted — the server rejects them. When a
+  room is deleted, everyone still in it is moved out automatically (they get a
+  `left` signal and capture stops).
+
 ## 0.2.0
 
 ### Русский

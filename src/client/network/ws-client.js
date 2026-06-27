@@ -79,7 +79,11 @@ function handleSignal(msg) {
       updateState({ currentRoom: msg.room })
       break
     case 'left':
+      // A forced leave (room was deleted out from under us) arrives the same
+      // way as a voluntary one.  Stop capture locally without re-sending
+      // `leave` — server-side the room is already gone / nulled.
       updateState({ currentRoom: null })
+      handlers.onForcedLeave?.()
       break
     case 'user_mute': {
       // Update muted status in the room's user list
@@ -116,6 +120,7 @@ export function wireHandlers() {
     send({ type: 'create', room })
     send({ type: 'join', room })
   }
+  handlers.onDelete = (room) => send({ type: 'delete', room })
   handlers.onMute = (muted) => send({ type: 'mute', muted })
   handlers.onIdentify = (username) => send({ type: 'identify', username })
   handlers.onDisconnect = disconnect

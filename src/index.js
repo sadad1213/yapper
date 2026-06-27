@@ -104,6 +104,11 @@ else {
       stopCapture()
       origDisconnect?.()
     }
+    // Server forced us out of a room (it got deleted) — stop capture without
+    // re-sending `leave`, same as a disconnect teardown of the audio path.
+    handlers.onForcedLeave = () => {
+      stopCapture()
+    }
   }
 
   // 6. Connect — serverless: discover a host on the LAN, or become the host.

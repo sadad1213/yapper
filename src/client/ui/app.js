@@ -21,6 +21,9 @@ const LEFT_W = 22            // inner width of the left (rooms) panel
 const MAX_USERNAME = 16       // short chars; server-side slice(0, 32) lets it through
 const MAX_ROOMNAME = 20       // short enough to fit a sidebar row: `▸ <name> <count>` in LEFT_W
 
+// Default rooms are permanent — keep in sync with src/server/rooms.js DEFAULTS.
+const DEFAULT_ROOMS = new Set(['general', 'gaming', 'music'])
+
 const THRESHOLD_PRESETS = [
   { value: 100, label: 'Quiet (100)' },
   { value: 200, label: 'Normal (200)' },
@@ -41,7 +44,7 @@ export const state = {
 }
 
 export const handlers = {
-  onJoin: null, onLeave: null, onCreate: null, onMute: null, onDisconnect: null,
+  onJoin: null, onLeave: null, onCreate: null, onDelete: null, onMute: null, onForcedLeave: null, onDisconnect: null,
 }
 
 let audioApi = null          // injected via registerAudio()
@@ -59,6 +62,7 @@ const ui = {
   prompt: null,              // text-input overlay (new room)
   volumePopup: null,         // per-user volume overlay { userId, username, vol }
   changelog: null,           // changelog overlay { title, rawLines, lines, scroll, rect }
+  confirm: null,             // yes/no overlay { title, onConfirm }
   userZones: [],             // clickable user rows [{ x0, x1, y, userId, username }]
   roomItems: [],             // left-panel navigation [{ type:'room'|'user'|'newRoom', ... }]
   selectedLine: 0,           // index into roomItems
@@ -131,6 +135,7 @@ function drawAll() {
   if (ui.prompt) drawPrompt()
   if (ui.volumePopup) drawVolumePopup()
   if (ui.changelog) drawChangelog()
+  if (ui.confirm) drawConfirm()
   sb.draw({ delta: true })
 }
 
@@ -308,6 +313,11 @@ function drawStatus() {
   seg('[N] new room', promptNewRoom)
   seg('[S] settings', openSettings)
   if (updateAvailable) seg('[U] update!', runUpdate, { color: 'yellow', bold: true })
+  // [D] delete — only when a deletable custom room is the selected row.
+  {
+    const it = ui.roomItems[ui.selectedLine]
+    if (it?.type === 'room' && !DEFAULT_ROOMS.has(it.name)) seg('[D] delete', promptDeleteRoom, { color: 'red' })
+  }
   seg('[Q] quit', quit)
 
   // Version in the bottom-right corner, with a transient "what's new" changelog
@@ -405,6 +415,24 @@ function drawPrompt() {
     putStr(bx + bw - cnt.length - 2, by + 2, cnt, p.value.length >= p.max ? { color: 'yellow', bold: true } : { dim: true })
   }
   putStr(bx + 2, by + bh - 1, ' enter ok · esc cancel ', { dim: true })
+}
+
+function drawConfirm() {
+  const { W, H } = L()
+  const c = ui.confirm
+  const bw = Math.min(42, W - 4), bh = 5
+  const bx = Math.floor((W - bw) / 2), by = Math.floor((H - bh) / 2)
+  const C = { color: 'cyan' }
+  putStr(bx, by, '╭' + '─'.repeat(bw - 2) + '╮', C)
+  for (let i = 1; i < bh - 1; i++) {
+    putStr(bx, by + i, '│', C)
+    putStr(bx + 1, by + i, ' '.repeat(bw - 2), {})
+    putStr(bx + bw - 1, by + i, '│', C)
+  }
+  putStr(bx, by + bh - 1, '╰' + '─'.repeat(bw - 2) + '╯', C)
+  putStr(bx + 2, by, ' confirm ', { color: 'red', bold: true })
+  putStr(bx + 2, by + 2, padEnd(c.title, bw - 4), { color: 'red' })
+  putStr(bx + 2, by + bh - 1, ' enter delete · esc cancel ', { dim: true })
 }
 
 function drawVolumePopup() {
@@ -523,6 +551,7 @@ function handleKey(name, matches, data) {
   if (name === 'CTRL_C') return quit()
   if (ui.volumePopup) return handleVolumeKey(name)
   if (ui.changelog) return handleChangelogKey(name)
+  if (ui.confirm) return handleConfirmKey(name)
   if (ui.prompt) return handlePromptKey(name, data)
   if (ui.modal)  return handleModalKey(name, data)
 
@@ -534,6 +563,7 @@ function handleKey(name, matches, data) {
     case 'm': case 'M': toggleMute(); break
     case 's': case 'S': openSettings(); break
     case 'n': case 'N': promptNewRoom(); break
+    case 'd': case 'D': if (!ui.modal && !ui.prompt && !ui.volumePopup && !ui.changelog && !ui.confirm) promptDeleteRoom(); break
     case 'c': case 'C': if (whatsNew) openChangelog(); break
     case 'u': case 'U': if (updateAvailable) runUpdate(); break
     case 'q': case 'Q': quit(); break
@@ -553,6 +583,14 @@ function handleVolumeKey(name) {
   if (name === 'LEFT')        { v.vol = Math.max(0, v.vol - 10); ui.dirty = true }
   else if (name === 'RIGHT')  { v.vol = Math.min(200, v.vol + 10); ui.dirty = true }
   else if (name === 'ESCAPE' || name === 'ENTER') closeVolumePopup()
+}
+
+function handleConfirmKey(name) {
+  const c = ui.confirm
+  if (!c) return
+  if (name === 'ENTER')          { ui.confirm = null; c.onConfirm?.(); ui.dirty = true }
+  else if (name === 'ESCAPE')    { ui.confirm = null; ui.dirty = true }
+  // any other key: ignore — confirm is yes/no only
 }
 
 function handleModalKey(name, data) {
@@ -584,6 +622,10 @@ function handleMouse(name, data) {
     return
   }
   if (ui.changelog) return handleChangelogMouse(name, x, y)
+  if (ui.confirm) {             // click anywhere cancels the confirm
+    if (name === 'MOUSE_LEFT_BUTTON_PRESSED') { ui.confirm = null; ui.dirty = true }
+    return
+  }
   if (ui.prompt) {              // click anywhere outside closes the prompt
     return
   }
@@ -710,6 +752,16 @@ function promptNewRoom() {
       }
       // Selection will clamp on next drawRooms rebuild
     },
+  }
+  ui.dirty = true
+}
+
+function promptDeleteRoom() {
+  const it = ui.roomItems[ui.selectedLine]
+  if (!it || it.type !== 'room' || DEFAULT_ROOMS.has(it.name)) return
+  ui.confirm = {
+    title: `delete room "${it.name}"?`,
+    onConfirm: () => { handlers.onDelete?.(it.name) },
   }
   ui.dirty = true
 }
