@@ -27,9 +27,13 @@ const MAX_ROOMNAME = 20       // short enough to fit a sidebar row: `▸ <name> 
 const DEFAULT_ROOMS = new Set(['general', 'gaming', 'music'])
 
 const THRESHOLD_PRESETS = [
-  { value: 100, label: 'Quiet (100)' },
-  { value: 200, label: 'Normal (200)' },
-  { value: 400, label: 'Loud (400)' },
+  { value: 100,  label: 'Quiet (100)' },
+  { value: 200,  label: 'Normal (200)' },
+  { value: 400,  label: 'Loud (400)' },
+  { value: 700,  label: 'Very loud (700)' },
+  { value: 1000, label: 'Noisy (1000)' },
+  { value: 1500, label: 'Strict (1500)' },
+  { value: 2200, label: 'Max (2200)' },
 ]
 
 // ─── State ─────────────────────────────────────────────────────────────────

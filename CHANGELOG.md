@@ -6,6 +6,21 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.98
+
+### Русский
+- Больше уровней чувствительности (порог VAD) в настройках: добавлены 700, 1000,
+  1500 и 2200 к прежним 100/200/400. Прежнего максимума (400) не хватало —
+  пробивал стук клавиатуры; теперь можно поднять порог выше, чтобы клавиши и
+  фоновый шум не уходили в эфир. Чем выше — тем громче нужно говорить, чтобы тебя
+  начали передавать.
+
+### English
+- More sensitivity levels (VAD threshold) in settings: added 700, 1000, 1500 and
+  2200 on top of 100/200/400. The old max (400) wasn't enough — keyboard clatter
+  punched through; you can now raise the gate so key presses and background noise
+  don't go on air. Higher = you must speak louder before transmitting starts.
+
 ## 0.2.97
 
 ### Русский
