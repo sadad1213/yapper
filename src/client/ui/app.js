@@ -7,6 +7,7 @@ import { getUserVolume, setUserVolume } from '../audio/playback.js'
 import { notifyRoomsChanged, notifyUpdateFound, notifyMuted, notifyUnmuted, notifyLeaving } from '../audio/notifications.js'
 import { preloadAll } from '../audio/loader.js'
 import { checkForUpdate, clearPendingUpdate, checkForUpdateManual, fetchChangelog } from '../../auto-update.js'
+import { HOTKEY_PRESETS, presetIndex, setMuteHotkey, stopHotkey } from '../hotkey.js'
 
 const term = termkit.terminal
 const config = new Conf({ projectName: 'yapper' })
@@ -346,7 +347,7 @@ function drawStatus() {
 function drawModal() {
   const { W, H } = L()
   const m = ui.modal
-  const bw = Math.min(54, W - 4), bh = 18
+  const bw = Math.min(54, W - 4), bh = 20
   const bx = Math.floor((W - bw) / 2), by = Math.floor((H - bh) / 2)
   m.rect = { bx, by, bw, bh }
   const C = { color: 'cyan' }
@@ -361,7 +362,7 @@ function drawModal() {
   putStr(bx + 2, by, ' settings ', { color: 'cyan', bold: true })
 
   const ix = bx + 2, rw = bw - 4
-  m.rowsY = [by + 2, by + 4, by + 6, by + 8, by + 10, by + 12, by + 16]
+  m.rowsY = [by + 2, by + 4, by + 6, by + 8, by + 10, by + 12, by + 14, by + 18]
 
   const uval = (m.editing && m.row === 0) ? m.edit + '█' : state.username
   modalField(ix, by + 2, rw, 'username', uval, m.row === 0)
@@ -387,21 +388,27 @@ function drawModal() {
   const nlabel = !non ? 'off' : isDenoiseAvailable() ? 'on' : 'on (loading…)'
   modalField(ix, by + 10, rw, 'noise', '‹ ' + nlabel + ' ›', m.row === 4)
 
-  // Row 5: check for updates — status shown inline so the button doubles as
+  // Row 5: global mute hotkey — toggles mute from any app (Windows only). On
+  // other platforms the binding is inert, so we say so instead of pretending.
+  const hk = HOTKEY_PRESETS[m.hotkeyIdx]?.label || 'off'
+  const hkVal = process.platform === 'win32' ? '‹ ' + hk + ' ›' : '‹ ' + hk + ' › (Windows only)'
+  modalField(ix, by + 12, rw, 'mute key', hkVal, m.row === 5)
+
+  // Row 6: check for updates — status shown inline so the button doubles as
   // a result line ("up to date" / "update vX available" / "check failed").
   // Sticky while there is a pending update; transient otherwise (auto-clears
   // after 4s).
-  const csel = m.row === 5
+  const csel = m.row === 6
   let cval, cattr
   if (m.checkStatus === 'checking')    { cval = '⟳ checking…';                                      cattr = { color: 'yellow' } }
   else if (m.checkStatus === 'update') { cval = '! update v' + m.updateVer + ' available — press [U]'; cattr = { color: 'yellow', bold: true } }
   else if (m.checkStatus === 'latest') { cval = '✓ you are up to date';                                cattr = { color: 'green' } }
   else if (m.checkStatus === 'failed') { cval = '× check failed (rate limit / offline)';              cattr = { color: 'red', dim: true } }
   else                                 { cval = '▶ check for updates';                               cattr = {} }
-  putStr(ix, by + 12, padEnd(' ' + cval, rw), csel ? { bgColor: 'cyan', color: 'black' } : cattr)
+  putStr(ix, by + 14, padEnd(' ' + cval, rw), csel ? { bgColor: 'cyan', color: 'black' } : cattr)
 
-  putStr(ix + 1, by + 14, '↑↓ move · enter select · ‹ › adjust · esc close', { dim: true })
-  modalField(ix, by + 16, rw, '', '[ close ]', m.row === 6)
+  putStr(ix + 1, by + 16, '↑↓ move · enter select · ‹ › adjust · esc close', { dim: true })
+  modalField(ix, by + 18, rw, '', '[ close ]', m.row === 7)
 }
 
 function modalField(ix, y, rw, label, value, sel) {
@@ -692,10 +699,10 @@ function handleModalKey(name, data) {
     return
   }
   switch (name) {
-    case 'UP':    m.row = (m.row + 6) % 7; ui.dirty = true; break
-    case 'DOWN':  m.row = (m.row + 1) % 7; ui.dirty = true; break
-    case 'LEFT':  if (m.row === 1) cycleDevice(-1); else if (m.row === 3) cycleThreshold(-1); else if (m.row === 4) toggleDenoise(); break
-    case 'RIGHT': if (m.row === 1) cycleDevice(1); else if (m.row === 3) cycleThreshold(1); else if (m.row === 4) toggleDenoise(); break
+    case 'UP':    m.row = (m.row + 7) % 8; ui.dirty = true; break
+    case 'DOWN':  m.row = (m.row + 1) % 8; ui.dirty = true; break
+    case 'LEFT':  if (m.row === 1) cycleDevice(-1); else if (m.row === 3) cycleThreshold(-1); else if (m.row === 4) toggleDenoise(); else if (m.row === 5) cycleHotkey(-1); break
+    case 'RIGHT': if (m.row === 1) cycleDevice(1); else if (m.row === 3) cycleThreshold(1); else if (m.row === 4) toggleDenoise(); else if (m.row === 5) cycleHotkey(1); break
     case 'ENTER': modalActivate(); break
     case 's': case 'S': case 'q': case 'Q': case 'ESCAPE': closeSettings(); break
   }
@@ -863,7 +870,7 @@ function openSettings() {
   const devices = audioApi?.getInputDevices ? audioApi.getInputDevices() : [{ id: -1, name: 'default' }]
   const savedThreshold = config.get('vadThreshold', 200)
   const presetIdx = THRESHOLD_PRESETS.findIndex(p => p.value === savedThreshold)
-  ui.modal = { row: 0, editing: false, edit: '', devices, devIdx: 0, testing: false, testLevel: 0, testError: false, thresholdIdx: presetIdx >= 0 ? presetIdx : 1, checkStatus: null, updateVer: null, _checkTimer: null }
+  ui.modal = { row: 0, editing: false, edit: '', devices, devIdx: 0, testing: false, testLevel: 0, testError: false, thresholdIdx: presetIdx >= 0 ? presetIdx : 1, hotkeyIdx: presetIndex(config.get('muteHotkey', 'off')), checkStatus: null, updateVer: null, _checkTimer: null }
   ui.dirty = true
 }
 
@@ -882,8 +889,9 @@ function modalActivate() {
   else if (m.row === 2) toggleMicTest()
   else if (m.row === 3) cycleThreshold(1)
   else if (m.row === 4) toggleDenoise()
-  else if (m.row === 5) checkUpdateNow()
-  else if (m.row === 6) closeSettings()
+  else if (m.row === 5) cycleHotkey(1)
+  else if (m.row === 6) checkUpdateNow()
+  else if (m.row === 7) closeSettings()
 }
 
 function toggleDenoise() {
@@ -913,6 +921,15 @@ function cycleThreshold(dir) {
   const val = THRESHOLD_PRESETS[m.thresholdIdx].value
   config.set('vadThreshold', val)
   setThreshold(val)
+  ui.dirty = true
+}
+
+function cycleHotkey(dir) {
+  const m = ui.modal
+  m.hotkeyIdx = (m.hotkeyIdx + dir + HOTKEY_PRESETS.length) % HOTKEY_PRESETS.length
+  const preset = HOTKEY_PRESETS[m.hotkeyIdx]
+  config.set('muteHotkey', preset.id)
+  setMuteHotkey(preset.id, toggleMute)   // re-arms the global helper (no-op off Windows)
   ui.dirty = true
 }
 
@@ -983,6 +1000,7 @@ async function openChangelog() {
 // we exit or hand the terminal to a relaunched process.
 function teardownTerminal() {
   handlers.onDisconnect?.()
+  stopHotkey()                        // kill the global-hotkey helper process
   clearInterval(ui.loopTimer)
   term.grabInput(false)
   term.styleReset()
@@ -1103,6 +1121,7 @@ export function startUI() {
   setThreshold(config.get('vadThreshold', 200))
   setDenoiseEnabled(config.get('noiseSuppression', true))
   loadVolumes()
+  setMuteHotkey(config.get('muteHotkey', 'off'), toggleMute)   // arm the saved global mute key (Windows)
   term.fullscreen(true)
   term.hideCursor()
   term.grabInput({ mouse: 'button' })

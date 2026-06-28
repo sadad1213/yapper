@@ -6,6 +6,28 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.95
+
+### Русский
+- Новое: глобальная горячая клавиша мута (Windows). В настройках появилась
+  строка «mute key» — стрелками ‹ › выбирается комбинация, которая переключает
+  мут из любого приложения, даже когда окно yapper не в фокусе (как в Discord /
+  TeamSpeak). Реализовано «по-честному» через Win32 RegisterHotKey (помощник на
+  PowerShell), без слежки за всеми клавишами и без срабатывания антивируса; новых
+  зависимостей нет. Доступны F8/F9/F10/F12, Pause, ScrollLock и комбинации с
+  модификатором (Ctrl+Shift+M и т.п.). Одиночные буквы не предлагаются: глобальный
+  хоткей «съел» бы клавишу во всех программах. Пока только Windows.
+
+### English
+- New: global mute hotkey (Windows). Settings now has a "mute key" row — pick a
+  combo with ‹ › to toggle mute from any app, even when yapper isn't focused
+  (like Discord / TeamSpeak). Done the clean way via the Win32 RegisterHotKey API
+  (a small PowerShell helper): only the chosen combo is captured, so it doesn't
+  act like a keylogger or trip antivirus, and there are no new dependencies.
+  Choices: F8/F9/F10/F12, Pause, ScrollLock and modifier combos (Ctrl+Shift+M
+  etc.). Bare single letters aren't offered — a global hotkey would swallow the
+  key everywhere. Windows only for now.
+
 ## 0.2.94
 
 ### Русский
