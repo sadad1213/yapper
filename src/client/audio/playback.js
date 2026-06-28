@@ -53,6 +53,20 @@ export function stopMixer() {
   framesWritten = 0
 }
 
+// Like stopMixer, but keeps the timer ticking so the output device stays fed
+// with silence. Used when leaving a room on a backend whose output stream must
+// not starve — naudiodon/WASAPI can wedge an output that goes too long without
+// writes, which is why playback "disappears after a while" once it's no longer
+// being torn down on leave. Buffered voice is dropped; the device stays alive.
+export function pauseMixer() {
+  users.clear()
+  if (!timer) {
+    startTime = Date.now()
+    framesWritten = 0
+    timer = setInterval(tick, 10)
+  }
+}
+
 // ─── System sounds ───────────────────────────────────────────────────────────
 
 const SYSTEM_USER = 0          // virtual user ID; real IDs are ≥ 1

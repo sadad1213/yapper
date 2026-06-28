@@ -6,6 +6,27 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.93
+
+### Русский
+- Продолжение фикса 0.2.92. Звук других вернулся, но микрофон всё ещё молчал
+  после выхода из комнаты, а воспроизведение со временем пропадало. Две причины:
+  (1) приём с подменой слушателя `data` на naudiodon «подвешивал» доставку —
+  теперь процессор захвата остаётся подключённым к живому потоку постоянно, а
+  вход/выход из комнаты лишь переключает флаг (поток не меняет flowing-состояние);
+  (2) при выходе микшер полностью останавливался, и выходной поток naudiodon
+  голодал без записи и со временем затыкался — теперь при выходе он продолжает
+  писать тишину (`pauseMixer`), удерживая устройство живым.
+
+### English
+- Follow-up to 0.2.92. Others' audio came back, but the mic was still dead after
+  leaving a room and playback vanished after a while. Two causes: (1) swapping
+  the `data` listener on naudiodon wedged delivery — the capture processor now
+  stays attached to the live stream permanently and join/leave only flips a flag
+  (the stream never changes flowing state); (2) leaving fully stopped the mixer,
+  starving the naudiodon output until it stalled — leaving now keeps writing
+  silence (`pauseMixer`) so the device stays alive.
+
 ## 0.2.92
 
 ### Русский

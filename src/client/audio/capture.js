@@ -32,7 +32,6 @@ export class Capture extends EventEmitter {
     // it — required for naudiodon, whose quit() can't be undone.
     this.keepAlive = false
     this._streamStarted = false
-    this._drain = () => {}  // discards audio while kept alive but outside a room
   }
 
   start() {
@@ -40,11 +39,15 @@ export class Capture extends EventEmitter {
     this.active = true
     this._hangover = 0
     this._preRoll.length = 0
-    this.stream.removeListener('data', this._drain)   // stop discarding
-    this.stream.on('data', this._bound)
-    // Only (re)start the underlying device when it isn't already running. A
-    // keep-alive stop leaves a naudiodon stream running (just detached), and its
-    // AudioIO is single-shot — calling start() on it twice would throw. SoX is
+    // Attach the processor only if it isn't already. A keep-alive stop leaves it
+    // attached and the device running, so the live naudiodon stream never
+    // changes its flowing state — toggling 'data' listeners on it can wedge
+    // delivery so the mic silently stops after the first room leave.
+    if (!this.stream.listeners('data').includes(this._bound)) {
+      this.stream.on('data', this._bound)
+    }
+    // Only (re)start the device when it isn't already running. A kept-alive
+    // naudiodon stream is single-shot — start() twice would throw. SoX is
     // released on stop, so _streamStarted is false there and it respawns.
     if (!this._streamStarted) {
       if (this.stream.start) this.stream.start()
@@ -53,21 +56,18 @@ export class Capture extends EventEmitter {
   }
 
   // A normal stop releases the device (quit()). When `keepAlive` is set the
-  // device is kept open instead — naudiodon's quit() also tears down the shared
-  // PortAudio session (killing playback) and can't be restarted, so leaving a
-  // room must not quit it. In that case we keep the stream flowing into a drain
-  // listener so audio is discarded (not buffered) until the next start().
+  // device is kept open and running instead — naudiodon's quit() also tears down
+  // the shared PortAudio session (silencing playback) and can't be restarted, so
+  // leaving a room must not quit it. The processor stays attached; _onData gates
+  // on `active`, so captured audio is simply discarded until the next start().
   // `force: true` overrides keepAlive for a true release (device change / quit).
   stop({ force = false } = {}) {
     this.active = false
-    this.stream.removeListener('data', this._bound)
     this._buf = Buffer.alloc(0)
     this._hangover = 0
     this._preRoll.length = 0
-    if (!force && this.keepAlive) {
-      this.stream.on('data', this._drain)
-    } else {
-      this.stream.removeListener('data', this._drain)
+    if (force || !this.keepAlive) {
+      this.stream.removeListener('data', this._bound)
       if (this.stream.quit) this.stream.quit()
       this._streamStarted = false
     }

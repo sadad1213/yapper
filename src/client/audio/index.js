@@ -2,7 +2,7 @@ import { execSync } from 'child_process'
 import { EventEmitter } from 'events'
 import { SAMPLE_RATE, CHANNELS } from './capture.js'
 import { Capture } from './capture.js'
-import { initPlayback, startMixer, stopMixer, queueFrame } from './playback.js'
+import { initPlayback, startMixer, stopMixer, pauseMixer, queueFrame } from './playback.js'
 import { initDenoise } from './denoise.js'
 
 // Emits 'level' (0..1) on every captured frame — used by the UI VU meter.
@@ -141,7 +141,10 @@ export function startCapture(sendFn) {
 export function stopCapture() {
   if (!captureInstance) return
   captureInstance.stop()
-  stopMixer()
+  // When the device is kept alive across the leave (naudiodon), keep the output
+  // fed with silence so it doesn't starve and stall. SoX can be fully stopped.
+  if (captureInstance.keepAlive) pauseMixer()
+  else stopMixer()
 }
 
 // Loopback mic test: route our own encoded frames back through the decoder/mixer
@@ -160,6 +163,6 @@ export function startMicTest(onLevel) {
   return () => {
     captureInstance.off('frame', frameH)
     audioEvents.off('level', levelH)
-    if (!wasActive) { captureInstance.stop(); stopMixer() }
+    if (!wasActive) { captureInstance.stop(); captureInstance.keepAlive ? pauseMixer() : stopMixer() }
   }
 }
