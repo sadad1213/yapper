@@ -6,6 +6,28 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.96
+
+### Русский
+- Меньше задержки голоса без потери качества: перешли с 20-мс на 10-мс кадры
+  Opus. Это срезает ~40 мс в одну сторону — захват кадра 20→10 мс и джиттер-буфер
+  воспроизведения 60→30 мс (он измеряется в кадрах, а кадр стал вдвое короче).
+  Качество прозрачное: 10-мс кадры Opus неотличимы, битрейт прежний (64 кбит/с),
+  пакетов вдвое больше, но прирост трафика ничтожен. Бонус: кадр теперь ровно
+  совпадает с нативным 480-сэмпловым кадром RNNoise. Микшер тикает вдвое чаще
+  кадра, как и раньше. Если на дёрганом VPN появятся редкие заикания — крутить
+  JITTER_TARGET в playback.js.
+
+### English
+- Lower voice latency with no quality loss: switched from 20 ms to 10 ms Opus
+  frames. That shaves ~40 ms one-way — frame capture 20→10 ms and the playback
+  jitter buffer 60→30 ms (it's counted in frames, and frames are now half as
+  long). Quality is transparent: 10 ms Opus frames are indistinguishable, the
+  bitrate is unchanged (64 kbps), and the doubled packet rate adds negligible
+  traffic. Bonus: a frame now lines up exactly with RNNoise's native 480-sample
+  frame. The mixer still ticks at twice the frame rate. If a jittery VPN causes
+  rare stutter, tune JITTER_TARGET in playback.js.
+
 ## 0.2.95
 
 ### Русский

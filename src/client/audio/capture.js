@@ -4,7 +4,9 @@ import { denoiseFrame } from './denoise.js'
 
 export const SAMPLE_RATE = 48000
 export const CHANNELS = 1
-export const FRAME_SIZE = 960             // 20ms at 48kHz
+export const FRAME_SIZE = 480             // 10ms at 48kHz — short frames keep capture
+                                          // latency low and match RNNoise's native
+                                          // 480-sample frame exactly
 export const FRAME_BYTES = FRAME_SIZE * 2 // 16-bit samples
 
 // VAD smoothing. A bare "send only when above threshold" gate clips the soft
@@ -15,8 +17,8 @@ export const FRAME_BYTES = FRAME_SIZE * 2 // 16-bit samples
 //                 word is transmitted, not chopped off.
 //   • HANGOVER  — once speech is detected, keep sending for a short tail so brief
 //                 inter-word dips don't break the stream mid-utterance.
-const HANGOVER_FRAMES = 15   // ~300ms of "keep sending" after level drops
-const PREROLL_FRAMES  = 3    // ~60ms captured before the detected onset
+const HANGOVER_FRAMES = 30   // ~300ms of "keep sending" after level drops (10ms frames)
+const PREROLL_FRAMES  = 6    // ~60ms captured before the detected onset (10ms frames)
 
 export class Capture extends EventEmitter {
   constructor(encoder, audioStream) {

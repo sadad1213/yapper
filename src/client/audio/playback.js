@@ -1,8 +1,9 @@
 import { FRAME_SIZE, FRAME_BYTES } from './capture.js'
 
-const FRAME_MS = 20
-const JITTER_TARGET = 3     // pre-roll frames (~60ms) to absorb network jitter
-const MAX_BUFFER = 20       // ~400ms hard cap before dropping oldest frames
+const FRAME_MS = 10         // 10ms Opus frames (see capture.js FRAME_SIZE)
+const TICK_MS = FRAME_MS / 2 // tick twice per frame so wall-clock drift correction has headroom
+const JITTER_TARGET = 3     // pre-roll frames (~30ms) to absorb network jitter
+const MAX_BUFFER = 40       // ~400ms hard cap before dropping oldest frames
 
 const SILENCE = Buffer.alloc(FRAME_BYTES)
 
@@ -42,7 +43,7 @@ export function startMixer() {
   framesWritten = 0
   // Tick faster than the frame rate; the wall-clock drift correction in tick()
   // decides how many 20ms frames are actually due, so output stays in realtime.
-  timer = setInterval(tick, 10)
+  timer = setInterval(tick, TICK_MS)
 }
 
 export function stopMixer() {
@@ -63,7 +64,7 @@ export function pauseMixer() {
   if (!timer) {
     startTime = Date.now()
     framesWritten = 0
-    timer = setInterval(tick, 10)
+    timer = setInterval(tick, TICK_MS)
   }
 }
 
@@ -77,7 +78,7 @@ function ensureMixerRunning() {
   if (timer) return
   startTime = Date.now()
   framesWritten = 0
-  timer = setInterval(tick, 10)
+  timer = setInterval(tick, TICK_MS)
 }
 
 // Play a raw PCM buffer as a notification sound, mixing it on top of any
@@ -151,7 +152,7 @@ function tick() {
   const due = Math.floor((Date.now() - startTime) / FRAME_MS)
   let n = due - framesWritten
   if (n <= 0) return
-  if (n > 5) { framesWritten = due - 1; n = 1 }   // we stalled — resync instead of fast-forwarding
+  if (n > 10) { framesWritten = due - 1; n = 1 }   // stalled >~100ms — resync instead of fast-forwarding
   for (let i = 0; i < n; i++) { writeFrame(); framesWritten++ }
 }
 

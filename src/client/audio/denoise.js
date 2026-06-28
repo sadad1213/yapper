@@ -1,8 +1,8 @@
 // RNNoise-based noise suppression for the capture path.
 //
 // Operates on 48 kHz mono 16-bit PCM. RNNoise processes fixed 480-sample
-// (10 ms) chunks; our capture frames are 960 samples (20 ms), so each frame is
-// two RNNoise chunks fed through one persistent denoise state.
+// (10 ms) chunks, which now matches our capture frame exactly (one chunk per
+// frame); the loop below still handles any whole multiple of 480 just in case.
 //
 // Uses @jitsi/rnnoise-wasm's *sync* build: it inlines the WASM as base64, so
 // there's no separate .wasm file to locate at runtime — important for a global
