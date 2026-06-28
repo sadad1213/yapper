@@ -73,5 +73,14 @@ export function startResponder(wsPort) {
   })
   sock.on('error', () => {})
   sock.bind(DISCOVERY_PORT, () => { try { sock.setBroadcast(true) } catch {} })
-  return { stop: () => { try { sock.close() } catch {} } }
+  // stop() resolves once the UDP socket is fully closed, so a relaunching
+  // instance can re-bind the discovery port without racing the old one.
+  return {
+    stop: () => new Promise((resolve) => {
+      let done = false
+      const fin = () => { if (!done) { done = true; resolve() } }
+      try { sock.close(fin) } catch { fin() }
+      setTimeout(fin, 300)
+    }),
+  }
 }

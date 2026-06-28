@@ -6,6 +6,26 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.91
+
+### Русский
+- Продолжение фикса бесконечного «connect…» после рестарта. Теперь закрытие
+  discovery-порта (UDP 4748) тоже дожидается перед перезапуском: `stop()`
+  responder'а возвращает промис и резолвится после полного закрытия сокета — так
+  оба порта (4747 и 4748) гарантированно свободны к моменту `spawnSync`.
+- Важно: сам фикс рестарта живёт в коде ≥ 0.2.90, поэтому он срабатывает только
+  при обновлении С версии 0.2.90+ (обновление НА 0.2.90 ещё шло старым кодом —
+  отсюда «не помогло»). Эта 0.2.91 даёт цель для апдейта, чтобы проверить фикс.
+
+### English
+- Follow-up to the endless "connect…" restart fix. Closing the discovery port
+  (UDP 4748) is now awaited too before restart: the responder's `stop()` returns
+  a promise that resolves once the socket is fully closed, so both ports (4747
+  and 4748) are guaranteed free by the time spawnSync runs.
+- Note: the restart fix itself lives in code ≥ 0.2.90, so it only takes effect
+  when updating FROM 0.2.90+ (the update INTO 0.2.90 still ran the old code —
+  hence "didn't help"). This 0.2.91 gives an update target to verify the fix.
+
 ## 0.2.90
 
 ### Русский

@@ -129,7 +129,7 @@ else {
   // can neither connect nor host → endless "connect…". Clients are RST-terminated
   // (no TIME_WAIT) and we await the listen socket's close before returning.
   registerShutdown(async () => {
-    try { responder?.stop() } catch {}
+    try { await responder?.stop() } catch {}
     responder = null
     const server = wss
     wss = null
