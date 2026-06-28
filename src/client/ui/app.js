@@ -77,7 +77,8 @@ const ui = {
   selectedLine: 0,           // index into roomItems
   statusZones: [],           // clickable status-bar segments
   chat: { input: '', scroll: 0, stick: true, focused: false },  // chat composer + history scroll
-  chatZone: null,            // clickable chat region [{x0,x1,y0,y1}] for focusing the composer
+  chatZone: null,            // clickable chat region {x0,x1,y0,y1} for focusing the composer
+  chatLinkZones: [],         // clickable URL spans in chat [{x0,x1,y,url}]
 }
 
 // ─── Drawing primitives ───────────────────────────────────────────────────────
@@ -351,24 +352,31 @@ function drawUserRow(y, name, o, colX, colW) {
   putStr(colX + 2, y, padEnd(name, nameW), nameAttr)
 }
 
+const URL_RE = /^https?:\/\/[^\s]+$/i
+
 // Word-wrap one chat message ("name: text") to `width`, hard-breaking overlong
-// tokens. Own messages are tinted green so authorship reads at a glance.
+// tokens. Returns an array of display lines; each line is an array of segments
+// { text, attr, url }. URLs render blue+underline and carry their full target so
+// any wrapped fragment stays clickable. Own messages are tinted green.
 function wrapChatLine(name, text, width, own) {
-  const attr = own ? { color: 'green' } : {}
-  const out = []
-  let line = ''
-  for (let w of (name + ': ' + text).split(' ')) {
-    while (w.length > width) {                      // a single token longer than the column
-      if (line) { out.push({ text: line, attr }); line = '' }
-      out.push({ text: w.slice(0, width), attr })
-      w = w.slice(width)
+  const lines = []
+  let line = [], lineLen = 0
+  const flush = () => { lines.push(line); line = []; lineLen = 0 }
+  for (let tok of (name + ': ' + text).split(' ')) {
+    const url = URL_RE.test(tok) ? tok : null
+    const attr = url ? { color: 'blue', underline: true } : (own ? { color: 'green' } : {})
+    while (tok.length > width) {                    // token longer than the column → hard-break
+      if (lineLen > 0) flush()
+      lines.push([{ text: tok.slice(0, width), attr, url }])
+      tok = tok.slice(width)
     }
-    if (!line) line = w
-    else if ((line + ' ' + w).length <= width) line += ' ' + w
-    else { out.push({ text: line, attr }); line = w }
+    if (lineLen > 0 && lineLen + 1 + tok.length > width) flush()
+    if (lineLen > 0) { line.push({ text: ' ', attr: {}, url: null }); lineLen += 1 }
+    line.push({ text: tok, attr, url })
+    lineLen += tok.length
   }
-  out.push({ text: line, attr })
-  return out
+  flush()
+  return lines
 }
 
 // Right column — the current room's chat: scrollable history + a composer line.
@@ -402,9 +410,18 @@ function drawChat() {
   }
   const top = ui.chat.scroll
 
+  ui.chatLinkZones = []
   for (let i = 0; i < innerH; i++) {
-    const ln = lines[top + i]
-    putStr(chatX, histTop + i, padEnd(ln ? ln.text : '', chatW), ln ? ln.attr : {})
+    const y = histTop + i
+    putStr(chatX, y, ' '.repeat(chatW), {})         // clear the row first
+    const dl = lines[top + i]
+    if (!dl) continue
+    let x = chatX
+    for (const seg of dl) {
+      putStr(x, y, seg.text, seg.attr)
+      if (seg.url) ui.chatLinkZones.push({ x0: x, x1: x + seg.text.length - 1, y, url: seg.url })
+      x += seg.text.length
+    }
   }
   if (top > 0) putStr(chatX + chatW - 1, histTop, '▲', { dim: true })
   if (top + innerH < lines.length) putStr(chatX + chatW - 1, divY - 1, '▼', { dim: true })
@@ -784,6 +801,21 @@ function handleKey(name, matches, data) {
   }
 }
 
+// Open a URL in the OS default browser. User-initiated (click) and limited to
+// http(s). rundll32 on Windows avoids cmd/start quoting pitfalls.
+function openUrl(url) {
+  if (!/^https?:\/\//i.test(url)) return
+  import('child_process').then(({ spawn }) => {
+    try {
+      const p = process.platform === 'win32' ? spawn('rundll32', ['url.dll,FileProtocolHandler', url], { detached: true, stdio: 'ignore' })
+              : process.platform === 'darwin' ? spawn('open', [url], { detached: true, stdio: 'ignore' })
+              : spawn('xdg-open', [url], { detached: true, stdio: 'ignore' })
+      p.on('error', () => {})
+      p.unref()
+    } catch {}
+  }).catch(() => {})
+}
+
 function chatScroll(d) {
   ui.chat.stick = false
   ui.chat.scroll = Math.max(0, ui.chat.scroll + d)   // upper bound + re-stick handled in drawChat
@@ -881,6 +913,11 @@ function handleMouse(name, data) {
   if (name !== 'MOUSE_LEFT_BUTTON_PRESSED') return
 
   const { firstRow, lastRow, divX, statusRow } = L()
+
+  // A click on a URL opens it (takes precedence over focusing the composer).
+  for (const z of ui.chatLinkZones) {
+    if (x >= z.x0 && x <= z.x1 && y === z.y) { openUrl(z.url); return }
+  }
 
   // Click in the chat pane focuses the composer; any other click defocuses it.
   const cz = ui.chatZone

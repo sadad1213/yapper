@@ -6,6 +6,25 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.3.2
+
+### Русский
+- Ссылки в чате теперь синие, подчёркнутые и кликабельные — клик открывает их в
+  браузере/просмотрщике по умолчанию (на Windows через rundll32, на macOS/Linux
+  open/xdg-open). Длинные ссылки, перенесённые на несколько строк, остаются
+  кликабельными целиком — клик по любому куску открывает полный адрес.
+- Это заодно даёт «картинки на минималках»: ссылка на изображение кликабельна и
+  открывает его во внешнем просмотрщике. Встроенный показ картинок прямо в
+  терминале — отдельная история (см. ответ в обсуждении).
+
+### English
+- Links in chat are now blue, underlined and clickable — a click opens them in
+  the default browser/viewer (rundll32 on Windows, open/xdg-open on macOS/Linux).
+  Long links wrapped across lines stay fully clickable — clicking any fragment
+  opens the whole URL.
+- This doubles as "images, lite": an image link is clickable and opens it in an
+  external viewer. Inline in-terminal image rendering is a separate effort.
+
 ## 0.3.1
 
 ### Русский
