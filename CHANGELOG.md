@@ -6,6 +6,33 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.97
+
+### Русский
+- Голос теперь идёт по UDP (с автофолбэком на WS/TCP) — это убирает артефакты на
+  лоссовых линиях вроде Hamachi/Radmin. По TCP потерянный пакет переотправляется и
+  держит звук → заикания; по UDP потеря просто пропускается, Opus её маскирует, и
+  поток не замирает. Сигналинг (комнаты/join/leave) остался на WS. Как работает:
+  сервер при подключении выдаёт токен и UDP-порт (4749), клиент шлёт голос пакетом
+  `[token][opus]` и раз в 2 с keepalive (он же учит хост обратному адресу и держит
+  NAT). Хост — мост: каждому получателю шлёт по UDP, если есть свежий UDP-адрес,
+  иначе по WS, поэтому UDP- и WS-участники слышат друг друга. Если UDP заблокирован
+  — всё само работает по WS, как раньше. Порт 4749/UDP должен быть доступен (на
+  Hamachi/Radmin/Tailscale/LAN — да; через проброс только TCP — откат на WS).
+
+### English
+- Voice now runs over UDP (with automatic WS/TCP fallback), which kills the
+  artifacts on lossy links like Hamachi/Radmin. Over TCP a lost packet is
+  retransmitted and stalls the audio → stutter; over UDP the loss is just skipped,
+  Opus conceals it, and the stream keeps flowing. Signaling (rooms/join/leave)
+  stays on WS. How it works: on connect the server hands out a token and a UDP
+  port (4749); the client sends voice as `[token][opus]` plus a 2 s keepalive
+  (which also teaches the host its return address and holds NAT open). The host
+  bridges: it sends each recipient over UDP when it has a fresh UDP address for
+  them, else over WS — so UDP and WS participants still hear each other. If UDP is
+  blocked, everything falls back to WS as before. Port 4749/UDP must be reachable
+  (Hamachi/Radmin/Tailscale/LAN: yes; a TCP-only port-forward: WS fallback).
+
 ## 0.2.96
 
 ### Русский

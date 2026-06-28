@@ -1,11 +1,13 @@
 import WebSocket from 'ws'
 import { state, handlers, updateState, markTalking } from '../ui/app.js'
+import { initUdpAudio, configureUdp, sendUdpAudio, stopUdpAudio } from './udp-audio.js'
 
 let ws = null
 let reconnectTimer = null
 let audioQueueFn = null     // set to playback.queueFrame once audio is ready
 let resolveUrl = null       // async () => 'ws://host:port' | null  (re-runs discovery/host election)
 let stopped = false
+let currentHost = null      // host of the active ws:// url — where UDP voice is sent
 // The server echoes a `left` for every voluntary `leave` we send. We must NOT
 // treat that echo as a forced leave (which tears capture down): when switching
 // rooms directly the echo lands AFTER we've already re-joined and started the
@@ -22,7 +24,15 @@ export function setAudioQueue(fn) {
 export function connectManaged(resolver) {
   resolveUrl = resolver
   stopped = false
+  initUdpAudio(handleIncomingAudio)   // UDP voice and WS voice share one receive path
   attempt()
+}
+
+// Inbound voice — same handling whether it arrived over UDP or the WS fallback.
+function handleIncomingAudio(userId, opus) {
+  markTalking(userId, true)
+  setTimeout(() => markTalking(userId, false), 300)
+  if (audioQueueFn) audioQueueFn(userId, opus)
 }
 
 async function attempt() {
@@ -42,6 +52,7 @@ function scheduleRetry() {
 
 function openSocket(url) {
   if (ws) { try { ws.terminate() } catch {} }
+  try { currentHost = new URL(url).hostname } catch { currentHost = null }
   ws = new WebSocket(url)
 
   ws.on('open', () => {
@@ -55,11 +66,7 @@ function openSocket(url) {
       // Binary: [userId byte][opus data...]
       const buf = Buffer.isBuffer(data) ? data : Buffer.from(data)
       if (buf.length < 2) return
-      const userId = buf.readUInt8(0)
-      const opus = buf.slice(1)
-      markTalking(userId, true)
-      setTimeout(() => markTalking(userId, false), 300)
-      if (audioQueueFn) audioQueueFn(userId, opus)
+      handleIncomingAudio(buf.readUInt8(0), buf.slice(1))
     } else {
       try { handleSignal(JSON.parse(data.toString())) } catch {}
     }
@@ -67,6 +74,7 @@ function openSocket(url) {
 
   ws.on('close', () => {
     pendingLeaves = 0         // any unacked leaves are moot once the socket drops
+    stopUdpAudio()            // tear down the UDP path; the next `identified` re-arms it
     updateState({ connected: false, serverAddr: null, rooms: [], currentRoom: null })
     scheduleRetry()           // re-resolve: find the new host or become one
   })
@@ -78,6 +86,9 @@ function handleSignal(msg) {
   switch (msg.type) {
     case 'identified':
       updateState({ userId: msg.userId })
+      if (msg.token && msg.audioPort && currentHost) {
+        configureUdp({ host: currentHost, audioPort: msg.audioPort, token: msg.token })
+      }
       break
     case 'rooms':
       updateState({ rooms: msg.list })
@@ -113,11 +124,13 @@ export function send(obj) {
 
 export function sendAudio(frame) {
   if (state.muted) return                     // client-side mute — don't even send
+  if (sendUdpAudio(frame)) return             // UDP voice path (preferred); falls through until confirmed
   if (ws?.readyState === WebSocket.OPEN) ws.send(frame)
 }
 
 export function disconnect() {
   stopped = true
+  stopUdpAudio()
   clearTimeout(reconnectTimer)
   if (ws) { try { ws.terminate() } catch {}; ws = null }
 }

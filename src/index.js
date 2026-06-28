@@ -59,7 +59,7 @@ else {
   const { startUI, handlers, registerAudio, registerShutdown, setSelfLevel } = await import('./client/ui/app.js')
   const { connectManaged, wireHandlers, setAudioQueue, sendAudio } = await import('./client/network/ws-client.js')
   const { discover, startResponder } = await import('./net/discovery.js')
-  const { startWsServer, DEFAULT_PORT } = await import('./server/ws-server.js')
+  const { startWsServer, startAudioRelay, DEFAULT_PORT, AUDIO_PORT } = await import('./server/ws-server.js')
   const audio = await import('./client/audio/index.js')
   const { startCapture, stopCapture, getInputDevices, setInputDevice, startMicTest, audioEvents } = audio
 
@@ -122,15 +122,18 @@ else {
   let hosting = false
   let wss = null            // WebSocketServer when we're the host (else null)
   let responder = null      // discovery responder handle when hosting
+  let audioRelay = null     // UDP voice relay socket when hosting
 
-  // Release the host's ports (WS 4747 + discovery 4748) so a relaunched instance
-  // can re-bind them. Without this, a [R] restart leaves the old process holding
-  // the ports while its event loop is frozen by spawnSync, so the new process
-  // can neither connect nor host → endless "connect…". Clients are RST-terminated
-  // (no TIME_WAIT) and we await the listen socket's close before returning.
+  // Release the host's ports (WS 4747 + discovery 4748 + voice 4749) so a
+  // relaunched instance can re-bind them. Without this, a [R] restart leaves the
+  // old process holding the ports while its event loop is frozen by spawnSync, so
+  // the new process can neither connect nor host → endless "connect…". Clients are
+  // RST-terminated (no TIME_WAIT) and we await the listen socket's close.
   registerShutdown(async () => {
     try { await responder?.stop() } catch {}
     responder = null
+    try { audioRelay?.close() } catch {}
+    audioRelay = null
     const server = wss
     wss = null
     if (!server) return
@@ -154,6 +157,7 @@ else {
     try {
       wss = await startWsServer(DEFAULT_PORT)
       responder = startResponder(DEFAULT_PORT)
+      audioRelay = startAudioRelay(AUDIO_PORT)
       hosting = true
       return `ws://127.0.0.1:${DEFAULT_PORT}`
     } catch {

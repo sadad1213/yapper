@@ -1,11 +1,20 @@
 import { WebSocketServer } from 'ws'
+import dgram from 'dgram'
+import { randomBytes } from 'crypto'
 import { rooms, addRoom, deleteRoom, DEFAULTS } from './rooms.js'
 
 export const DEFAULT_PORT = 4747
+export const AUDIO_PORT = 4749        // UDP voice relay (4748 is discovery)
 let nextId = 1
 
-// Map<ws, { id, username, room: string|null, muted: bool }>
+// Map<ws, { id, username, room, muted, ws, token, udp, udpSeen }>
 const clients = new Map()
+// token(hex) → client, so a UDP voice packet can be traced back to its sender
+const byToken = new Map()
+
+let audioSocket = null                // host's UDP voice relay socket (null until hosting)
+const UDP_FRESH_MS = 6000             // a peer's UDP path is considered dead after this gap → WS
+const ACK = Buffer.from([0x00])       // 1-byte UDP reply: "got it, UDP works"
 
 function roomList() {
   const map = new Map()
@@ -70,20 +79,59 @@ function handleSignal(ws, msg) {
   }
 }
 
-function handleAudio(ws, data) {
-  const sender = clients.get(ws)
-  if (!sender || !sender.room || sender.muted) return
+// Forward one Opus frame from `sender` to everyone else in the room, choosing
+// each recipient's path independently: UDP when we've heard from them recently
+// (lower latency, loss-tolerant), else the WS/TCP fallback. The host bridges, so
+// a WS sender still reaches UDP listeners and vice versa.
+function relayAudio(sender, opus) {
+  if (!sender.room || sender.muted) return
 
   // Prepend 1-byte userId so the receiver knows who is talking
-  const frame = Buffer.allocUnsafe(1 + data.length)
+  const frame = Buffer.allocUnsafe(1 + opus.length)
   frame.writeUInt8(sender.id & 0xff, 0)
-  data.copy(frame, 1)
+  opus.copy(frame, 1)
 
-  for (const [otherWs, other] of clients) {
-    if (other.room === sender.room && otherWs !== ws && otherWs.readyState === 1) {
-      otherWs.send(frame)
+  const now = Date.now()
+  for (const peer of clients.values()) {
+    if (peer === sender || peer.room !== sender.room) continue
+    if (audioSocket && peer.udp && now - peer.udpSeen < UDP_FRESH_MS) {
+      try { audioSocket.send(frame, peer.udp.port, peer.udp.address) } catch {}
+    } else if (peer.ws.readyState === 1) {
+      peer.ws.send(frame)
     }
   }
+}
+
+function handleAudio(ws, data) {
+  const sender = clients.get(ws)
+  if (sender) relayAudio(sender, data)
+}
+
+// UDP voice from clients: [token(4)][opus] is audio; [token(4)] alone is a
+// keepalive (also learns the client's return address and holds NAT open).
+function handleUdp(msg, rinfo) {
+  if (msg.length < 4) return
+  const client = byToken.get(msg.toString('hex', 0, 4))
+  if (!client) return
+  client.udp = { address: rinfo.address, port: rinfo.port }
+  client.udpSeen = Date.now()
+  if (msg.length === 4) {
+    try { audioSocket.send(ACK, rinfo.port, rinfo.address) } catch {}   // confirm UDP works
+    return
+  }
+  relayAudio(client, msg.subarray(4))
+}
+
+// Start the host's UDP voice relay. Best-effort: if it can't bind, clients just
+// keep using the WS audio path.
+export function startAudioRelay(port = AUDIO_PORT) {
+  const sock = dgram.createSocket('udp4')
+  sock.on('message', handleUdp)
+  sock.on('error', () => {})
+  sock.on('close', () => { if (audioSocket === sock) audioSocket = null })
+  try { sock.bind(port) } catch {}
+  audioSocket = sock
+  return sock
 }
 
 // Resolves once the server is listening; rejects on bind error (e.g. EADDRINUSE),
@@ -97,8 +145,10 @@ export function startWsServer(port = DEFAULT_PORT) {
 
     wss.on('connection', (ws) => {
       const id = nextId > 255 ? (nextId = 1) : nextId++
-      const client = { id, username: `user${id}`, room: null, muted: false }
+      const token = randomBytes(4).toString('hex')
+      const client = { id, username: `user${id}`, room: null, muted: false, ws, token, udp: null, udpSeen: 0 }
       clients.set(ws, client)
+      byToken.set(token, client)
 
       ws.on('message', (data, isBinary) => {
         if (isBinary) handleAudio(ws, data)
@@ -109,10 +159,12 @@ export function startWsServer(port = DEFAULT_PORT) {
 
       ws.on('close', () => {
         clients.delete(ws)
+        byToken.delete(token)
         broadcast({ type: 'rooms', list: roomList() })
       })
 
-      send(ws, { type: 'identified', userId: id })
+      // token + audioPort let the client open the UDP voice path (with WS fallback)
+      send(ws, { type: 'identified', userId: id, token, audioPort: AUDIO_PORT })
       send(ws, { type: 'rooms', list: roomList() })
     })
   })
