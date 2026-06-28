@@ -64,6 +64,7 @@ const ui = {
   volumePopup: null,         // per-user volume overlay { userId, username, vol }
   changelog: null,           // changelog overlay { title, rawLines, lines, scroll, rect }
   confirm: null,             // yes/no overlay { title, onConfirm }
+  update: null,              // self-update overlay { status, startedAt, pct, last, code, rect }
   userZones: [],             // clickable user rows [{ x0, x1, y, userId, username }]
   roomItems: [],             // left-panel navigation [{ type:'room'|'user'|'newRoom', ... }]
   selectedLine: 0,           // index into roomItems
@@ -137,6 +138,7 @@ function drawAll() {
   if (ui.volumePopup) drawVolumePopup()
   if (ui.changelog) drawChangelog()
   if (ui.confirm) drawConfirm()
+  if (ui.update) drawUpdate()
   sb.draw({ delta: true })
 }
 
@@ -442,6 +444,79 @@ function drawConfirm() {
   putStr(bx + 2, by + bh - 1, ' enter delete · esc cancel ', { dim: true })
 }
 
+const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+function drawUpdate() {
+  const { W, H } = L()
+  const u = ui.update
+  const bw = Math.min(52, W - 4), bh = 9
+  const bx = Math.floor((W - bw) / 2), by = Math.floor((H - bh) / 2)
+  u.rect = { bx, by, bw, bh }
+  const C = { color: 'cyan' }
+  putStr(bx, by, '╭' + '─'.repeat(bw - 2) + '╮', C)
+  for (let i = 1; i < bh - 1; i++) {
+    putStr(bx, by + i, '│', C)
+    putStr(bx + 1, by + i, ' '.repeat(bw - 2), {})
+    putStr(bx + bw - 1, by + i, '│', C)
+  }
+  putStr(bx, by + bh - 1, '╰' + '─'.repeat(bw - 2) + '╯', C)
+  putStr(bx + 2, by, ' update ', { color: 'cyan', bold: true })
+
+  const ix = bx + 3, iw = bw - 6
+
+  // Headline + progress bar. While running the bar creeps toward ~95% on a time
+  // estimate (npm gives little granular feedback); it snaps to 100% on success.
+  if (u.status === 'running') {
+    const spin = SPINNER[Math.floor(Date.now() / 80) % SPINNER.length]
+    u.pct = Math.min(95, Math.round((Date.now() - u.startedAt) / UPDATE_EST_MS * 95))
+    putStr(ix, by + 2, spin + '  Updating yapper…', { color: 'cyan', bold: true })
+  } else if (u.status === 'done') {
+    putStr(ix, by + 2, '✓  Updated to the latest version!', { color: 'green', bold: true })
+  } else {
+    putStr(ix, by + 2, '✗  Update failed (exit ' + u.code + ')', { color: 'red', bold: true })
+  }
+
+  const barW = iw - 6
+  const frac = u.pct / 100
+  const barAttr = u.status === 'failed' ? { color: 'red' }
+                : u.status === 'done'   ? { color: 'green' }
+                : { color: 'cyan' }
+  putStr(ix, by + 4, bar(frac, barW), barAttr)
+  putStr(ix + barW + 1, by + 4, String(u.pct).padStart(3) + '%', { dim: true })
+
+  // Footer: last npm line while running, action hints once finished.
+  if (u.status === 'running') {
+    const line = u.last ? 'npm: ' + u.last : 'starting…'
+    putStr(ix, by + 6, padEnd(line.slice(0, iw), iw), { dim: true })
+  } else if (u.status === 'done') {
+    putStr(ix, by + 6, '[R] restart now   ·   [Esc] restart later', { color: 'yellow' })
+  } else {
+    putStr(ix, by + 6, padEnd('install -g ' + UPDATE_URL, iw).slice(0, iw), { dim: true })
+    putStr(ix, by + 7, '[Esc] close', { dim: true })
+  }
+}
+
+function handleUpdateKey(name) {
+  const u = ui.update
+  if (!u) return
+  if (u.status === 'running') return             // block input until npm finishes
+  if (u.status === 'done' && (name === 'r' || name === 'R' || name === 'ENTER')) {
+    restartApp(); return
+  }
+  if (name === 'ESCAPE' || name === 'q' || name === 'Q' ||
+      (u.status === 'failed' && name === 'ENTER')) {
+    ui.update = null; ui.dirty = true
+  }
+}
+
+function handleUpdateMouse(name, x, y) {
+  const u = ui.update
+  if (!u || u.status === 'running') return        // no clicks mid-install
+  if (name !== 'MOUSE_LEFT_BUTTON_PRESSED') return
+  if (u.status === 'done') { restartApp(); return }
+  ui.update = null; ui.dirty = true               // failed → any click closes
+}
+
 function drawVolumePopup() {
   const { W, H } = L()
   const v = ui.volumePopup
@@ -556,6 +631,7 @@ function handleChangelogMouse(name, x, y) {
 // ─── Input: keyboard ──────────────────────────────────────────────────────────
 function handleKey(name, matches, data) {
   if (name === 'CTRL_C') return quit()
+  if (ui.update) return handleUpdateKey(name)
   if (ui.volumePopup) return handleVolumeKey(name)
   if (ui.changelog) return handleChangelogKey(name)
   if (ui.confirm) return handleConfirmKey(name)
@@ -624,6 +700,7 @@ function handleModalKey(name, data) {
 function handleMouse(name, data) {
   const x = data.x - 1, y = data.y - 1   // terminal is 1-based, buffer 0-based
 
+  if (ui.update) return handleUpdateMouse(name, x, y)
   if (ui.volumePopup) {         // click anywhere outside closes
     if (name === 'MOUSE_LEFT_BUTTON_PRESSED') closeVolumePopup()
     return
@@ -897,7 +974,9 @@ async function openChangelog() {
   wrapChangelog()
 }
 
-function quit() {
+// Tear down the alt-screen TUI and restore a normal terminal. Used right before
+// we exit or hand the terminal to a relaunched process.
+function teardownTerminal() {
   handlers.onDisconnect?.()
   clearInterval(ui.loopTimer)
   term.grabInput(false)
@@ -905,46 +984,73 @@ function quit() {
   term.clear()
   term.fullscreen(false)
   process.stdout.write('\x1b[?25h')   // show cursor (terminal-kit compat)
+}
+
+function quit() {
+  teardownTerminal()
   process.exit(0)
 }
 
+const UPDATE_URL = 'https://github.com/sadad1213/yapper/archive/refs/heads/main.tar.gz'
+const UPDATE_EST_MS = 15000   // rough install time — drives the indeterminate bar
+
+// Self-update without leaving the TUI. npm runs as a piped child (its output is
+// captured, never printed onto the alt-screen, so nothing garbles the UI), and
+// progress is shown in a modal. On success the user can restart in place.
 async function runUpdate() {
-  // Exit TUI cleanly first, install in the foreground, then tell the user to
-  // run yapper again. Keeping the TUI alive while npm runs fights terminal-kit's
-  // fullscreen/alt-screen buffer and garbles the screen, so we tear down first.
-  handlers.onDisconnect?.()
-  clearInterval(ui.loopTimer)
-  term.grabInput(false)
-  term.styleReset()
-  term.clear()
-  term.fullscreen(false)
-  process.stdout.write('\x1b[?25h')   // show cursor (terminal-kit compat)
+  if (ui.update) return               // already updating — ignore re-trigger
+  ui.modal = null                     // close settings if it was open
+  ui.update = { status: 'running', startedAt: Date.now(), pct: 0, last: '', code: 0, rect: null }
+  ui.dirty = true
 
   const { spawn } = await import('child_process')
-  console.log('\n' + '─'.repeat(40))
-  console.log('  yapper — updating to latest...\n')
-
   // shell:true is required on Windows (npm is npm.cmd, and spawning .cmd needs a
-  // shell since the CVE-2024-27980 fix). Pass the command as one string rather
-  // than args+shell:true to avoid DEP0190 — the URL is a hardcoded constant, so
-  // there's nothing unescaped to inject.
-  const url = 'https://github.com/sadad1213/yapper/archive/refs/heads/main.tar.gz'
-  const child = spawn(`npm install -g ${url}`, {
-    stdio: 'inherit',
+  // shell since the CVE-2024-27980 fix). Pass the command as one string (no args
+  // array) to avoid DEP0190 — the URL is a hardcoded constant, nothing to inject.
+  // NODE_NO_WARNINGS also silences any deprecation notices npm's own node emits.
+  const child = spawn(`npm install -g ${UPDATE_URL}`, {
+    stdio: ['ignore', 'pipe', 'pipe'],
     shell: true,
+    env: { ...process.env, NODE_NO_WARNINGS: '1' },
   })
 
-  child.on('close', (code) => {
-    console.log('\n' + '─'.repeat(40))
-    if (code === 0) {
-      console.log('  ✓ Update complete! Run yapper again.')
-      clearPendingUpdate()
-    } else {
-      console.log('  ✗ Update failed (code ' + code + '). Try manually:')
-      console.log('    npm install -g https://github.com/sadad1213/yapper/archive/refs/heads/main.tar.gz')
+  const onData = (d) => {
+    if (!ui.update) return
+    for (const line of d.toString().split('\n')) {
+      const l = line.trim()
+      if (l) ui.update.last = l       // keep the most recent meaningful line
     }
-    process.exit(code ?? 1)
-  })
+    ui.dirty = true
+  }
+  child.stdout?.on('data', onData)
+  child.stderr?.on('data', onData)
+
+  const finish = (code) => {
+    if (!ui.update) return
+    if (code === 0) {
+      ui.update.status = 'done'
+      ui.update.pct = 100
+      clearPendingUpdate()
+      updateAvailable = false          // installed — hide the [U] hint
+    } else {
+      ui.update.status = 'failed'
+      ui.update.code = code ?? 1
+    }
+    ui.dirty = true
+  }
+  child.on('close', finish)
+  child.on('error', () => finish(1))
+}
+
+// Relaunch the freshly installed yapper in place, then exit this (old) process.
+// spawnSync runs sequentially so there's no overlap between the two on screen.
+async function restartApp() {
+  teardownTerminal()
+  try {
+    const { spawnSync } = await import('child_process')
+    spawnSync('yapper', { stdio: 'inherit', shell: true })   // string cmd, no args → no DEP0190
+  } catch {}
+  process.exit(0)
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────
@@ -968,7 +1074,7 @@ export function registerAudio(api) { audioApi = api }
 
 function loop() {
   state.selfLevel = Math.max(0, state.selfLevel - 0.06)   // smooth release
-  const animating = state.talking.size > 0 || ui.modal?.testing || state.selfLevel > 0.01
+  const animating = state.talking.size > 0 || ui.modal?.testing || state.selfLevel > 0.01 || ui.update?.status === 'running'
   if (ui.dirty || animating) { drawAll(); ui.dirty = false }
 }
 

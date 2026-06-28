@@ -6,6 +6,35 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.7
+
+### Русский
+- Обновление теперь происходит **внутри приложения**, без выхода в обычный
+  терминал. Раньше TUI закрывался, npm писал поверх экрана, всё налезало друг
+  на друга, а после установки прога просто закрывалась — приходилось вручную
+  снова набирать `yapper`. Теперь по [U] открывается аккуратная модалка с
+  анимированным прогресс-баром; вывод npm перехватывается (на экран не лезет).
+- Когда установка завершилась — кнопка **[R] restart now** сразу перезапускает
+  уже новую версию (Esc — перезапустить позже). Микрофон перед перезапуском
+  освобождается.
+- Полностью убран варнинг `DEP0190` при обновлении: команда запускается строкой
+  без массива аргументов, вывод идёт в pipe, а дочернему процессу передаётся
+  `NODE_NO_WARNINGS=1` — так что предупреждение не появляется ни от нас, ни от
+  npm и не попадает на экран.
+
+### English
+- Updating now happens **inside the app**, without dropping to the raw terminal.
+  Previously the TUI closed, npm printed over the screen and everything
+  overlapped, and afterwards the app just exited — you had to type `yapper`
+  again by hand. Now [U] opens a clean modal with an animated progress bar; npm's
+  output is captured (never drawn over the UI).
+- When the install finishes, an **[R] restart now** button relaunches straight
+  into the new version (Esc to restart later). The mic is released first.
+- The `DEP0190` warning during updates is gone for good: the command runs as a
+  single string (no args array), output is piped, and the child gets
+  `NODE_NO_WARNINGS=1` — so the warning is emitted neither by us nor by npm and
+  never reaches the screen.
+
 ## 0.2.6
 
 ### Русский

@@ -88,7 +88,7 @@ yapper --help
 - **D** — delete the selected custom room (defaults can't be deleted; asks for confirmation)
 - **S** — settings (username, microphone, mic test, VAD sensitivity, noise suppression)
 - **C** — open the changelog (shown after an update, to the left of the version; auto-hides after 30s)
-- **U** — install the latest update (shown in the status bar when one is available)
+- **U** — install the latest update in-app (progress shown in a modal; press **R** to restart into the new version when it's done — no need to retype `yapper`)
 - **Q** — quit
 
 ### Over Hamachi / Radmin
