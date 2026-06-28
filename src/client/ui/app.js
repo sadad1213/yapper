@@ -19,8 +19,7 @@ const _hadConfig = Object.keys(config.store).length > 0
 const require = createRequire(import.meta.url)
 const VERSION = require('../../../package.json').version
 
-const LEFT_W = 22            // inner width of the left (rooms) panel
-const USERS_W = 22          // inner width of the middle "who's here" column (3-col layout)
+const LEFT_W = 22            // min inner width of the left (rooms) panel
 const THREE_COL_MIN = 70    // terminal width at/above which the middle column is shown
 const MAX_USERNAME = 16       // short chars; server-side slice(0, 32) lets it through
 const MAX_ROOMNAME = 20       // short enough to fit a sidebar row: `▸ <name> <count>` in LEFT_W
@@ -131,19 +130,25 @@ function L() {
   const headerRow = 1, ulineRow = 2, firstRow = 3
   const sepRow = H - 3, statusRow = H - 2
   const lastRow = sepRow - 1
-  const divX = LEFT_W + 1                 // first divider: rooms │ rest
   const threeCol = W >= THREE_COL_MIN
-  let usersX = 0, usersW = 0, midDiv = null, chatX, chatW
+  let roomsW, divX, usersX = 0, usersW = 0, midDiv = null, chatX, chatW
   if (threeCol) {
+    // Three roughly-equal columns. Budget = W minus 2 borders, 2 (divider+space)
+    // gaps and a 1-col right margin; rooms & who's-here take a third each, chat
+    // gets the rest (≈ the same), so no column dwarfs the others.
+    const base = Math.max(LEFT_W, Math.floor((W - 7) / 3))
+    roomsW = base; usersW = base
+    divX = 1 + roomsW                      // first divider: rooms │ who's-here
     usersX = divX + 2
-    usersW = USERS_W
-    midDiv = usersX + usersW              // second divider: who's-here │ chat
+    midDiv = usersX + usersW               // second divider: who's-here │ chat
     chatX = midDiv + 2
   } else {
+    roomsW = LEFT_W
+    divX = 1 + roomsW
     chatX = divX + 2
   }
   chatW = Math.max(8, W - chatX - 2)
-  return { W, H, divX, threeCol, usersX, usersW, midDiv, chatX, chatW, headerRow, ulineRow, firstRow, sepRow, statusRow, lastRow }
+  return { W, H, roomsW, divX, threeCol, usersX, usersW, midDiv, chatX, chatW, headerRow, ulineRow, firstRow, sepRow, statusRow, lastRow }
 }
 
 // ─── Render ────────────────────────────────────────────────────────────────
@@ -171,7 +176,7 @@ function drawAll() {
 }
 
 function drawFrame() {
-  const { W, H, divX, threeCol, usersX, usersW, midDiv, chatX, chatW, headerRow, ulineRow, sepRow, statusRow, lastRow } = L()
+  const { W, H, roomsW, divX, threeCol, usersX, usersW, midDiv, chatX, chatW, headerRow, ulineRow, sepRow, statusRow, lastRow } = L()
   const dim = { dim: true }
 
   // top + bottom borders
@@ -198,7 +203,7 @@ function drawFrame() {
 
   // headers
   putStr(2, headerRow, 'ROOMS', { bold: true })
-  putStr(2, ulineRow, '─'.repeat(LEFT_W - 1), dim)
+  putStr(2, ulineRow, '─'.repeat(roomsW - 1), dim)
   const room = state.rooms.find(r => r.name === state.currentRoom)
   const titleAttr = state.currentRoom ? { color: 'cyan', bold: true } : dim
   const title = state.currentRoom || 'no room'
@@ -218,7 +223,7 @@ function drawFrame() {
 }
 
 function drawRooms() {
-  const { firstRow, lastRow } = L()
+  const { firstRow, lastRow, roomsW } = L()
 
   // Build flat navigation list from rooms + expanded members
   ui.roomItems = []
@@ -266,15 +271,15 @@ function drawRooms() {
       const count = String(room?.users?.length || 0)
       const icon = cur ? '▸' : ' '
       const label = `${icon} ${item.name}`
-      const line = padEnd(label, LEFT_W - 1 - count.length) + count
+      const line = padEnd(label, roomsW - 1 - count.length) + count
       const attr = sel ? { bgColor: 'cyan', color: 'black' }
                  : cur ? { color: 'green', bold: true } : {}
-      putStr(1, y, padEnd(line, LEFT_W), attr)
+      putStr(1, y, padEnd(line, roomsW), attr)
       // Unread chat badge (only for rooms you're not currently in).
       const unread = state.unread[item.name] || 0
       if (unread > 0 && !cur) {
         const badge = '●' + (unread > 9 ? '9+' : unread)
-        const bx = 1 + Math.max(0, LEFT_W - count.length - badge.length - 1)
+        const bx = 1 + Math.max(0, roomsW - count.length - badge.length - 1)
         putStr(bx, y, badge, sel ? { color: 'yellow', bold: true, bgColor: 'cyan' } : { color: 'yellow', bold: true })
       }
     } else if (item.type === 'user') {
@@ -284,16 +289,16 @@ function drawRooms() {
       const attr = sel ? { bgColor: 'cyan', color: 'black' }
                  : item.self ? { color: 'green', bold: true }
                  : { dim: true }
-      putStr(1, y, padEnd(line, LEFT_W), attr)
+      putStr(1, y, padEnd(line, roomsW), attr)
     }
     y++
   }
 
   // Footer: [+ new room] pinned to the very bottom of the sidebar, with a
   // thin divider above it so it reads as an action, not just another room.
-  putStr(1, lastRow - 1, '─'.repeat(LEFT_W), { dim: true })
+  putStr(1, lastRow - 1, '─'.repeat(roomsW), { dim: true })
   const sel = newRoomIdx === ui.selectedLine && !ui.modal && !ui.prompt && !ui.volumePopup && !ui.changelog
-  putStr(1, lastRow, padEnd('+ new room', LEFT_W), sel ? { bgColor: 'cyan', color: 'black' } : { dim: true })
+  putStr(1, lastRow, padEnd('+ new room', roomsW), sel ? { bgColor: 'cyan', color: 'black' } : { dim: true })
   ui.newRoomY = lastRow
 }
 

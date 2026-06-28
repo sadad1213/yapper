@@ -6,6 +6,20 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.3.1
+
+### Русский
+- Колонки выровнены: раньше чат был шире двух других панелей вместе взятых.
+  Теперь три колонки (румы / кто в руме / чат) занимают примерно по трети ширины
+  окна — сбалансированно и аккуратно. Панель румов тоже расширяется вместе с
+  остальными (длинные ники больше не обрезаются).
+
+### English
+- Balanced columns: chat used to be wider than the other two panels combined.
+  The three columns (rooms / who's-here / chat) now each take roughly a third of
+  the window width — even and tidy. The rooms panel grows along with the rest
+  (long names no longer get clipped).
+
 ## 0.3.0
 
 ### Русский
