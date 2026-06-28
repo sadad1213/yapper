@@ -1048,7 +1048,13 @@ async function restartApp() {
   teardownTerminal()
   try {
     const { spawnSync } = await import('child_process')
-    spawnSync('yapper', { stdio: 'inherit', shell: true })   // string cmd, no args → no DEP0190
+    // Re-run exactly how we were launched: node + the same script and args. This
+    // works both for a global install (npm overwrote the script at this path, so
+    // it now holds the new code) and for a dev run (node bin/yapper.js), and it
+    // preserves args like `connect <ip>`. shell:false + args array → no DEP0190.
+    const args = process.argv.slice(1)               // [scriptPath, ...userArgs]
+    if (args.length) spawnSync(process.execPath, args, { stdio: 'inherit' })
+    else spawnSync('yapper', { stdio: 'inherit', shell: true })   // fallback: PATH lookup
   } catch {}
   process.exit(0)
 }

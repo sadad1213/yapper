@@ -6,6 +6,25 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.8
+
+### Русский
+- Кнопка [R] restart теперь корректно перезапускает и при dev-запуске
+  (`node bin/yapper.js`), а не только при глобальной установке. Перезапуск
+  повторяет исходный вызов — `node` + тот же скрипт и аргументы
+  (`process.argv`), — поэтому подхватывается обновлённый код по тому же пути и
+  сохраняются аргументы вроде `connect <ip>` (после рестарта переподключишься к
+  тому же хосту). Если путь скрипта почему-то недоступен — фолбэк на `yapper` из
+  PATH.
+
+### English
+- The [R] restart button now works for a dev run (`node bin/yapper.js`), not
+  just a global install. Restart re-runs the original invocation — `node` plus
+  the same script and args (`process.argv`) — so it picks up the updated code at
+  the same path and preserves args like `connect <ip>` (you reconnect to the
+  same host after restart). If the script path is somehow unavailable it falls
+  back to `yapper` from PATH.
+
 ## 0.2.7
 
 ### Русский
