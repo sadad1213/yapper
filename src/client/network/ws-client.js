@@ -1,5 +1,5 @@
 import WebSocket from 'ws'
-import { state, handlers, updateState, markTalking } from '../ui/app.js'
+import { state, handlers, updateState, markTalking, addChatMessage, mergeChatHistory } from '../ui/app.js'
 import { initUdpAudio, configureUdp, sendUdpAudio, stopUdpAudio } from './udp-audio.js'
 
 let ws = null
@@ -115,6 +115,12 @@ function handleSignal(msg) {
       updateState({ rooms })
       break
     }
+    case 'chat':
+      addChatMessage(msg.room, msg.msg)
+      break
+    case 'chat_history':
+      mergeChatHistory(msg.room, msg.messages)
+      break
   }
 }
 
@@ -146,5 +152,6 @@ export function wireHandlers() {
   handlers.onDelete = (room) => send({ type: 'delete', room })
   handlers.onMute = (muted) => send({ type: 'mute', muted })
   handlers.onIdentify = (username) => send({ type: 'identify', username })
+  handlers.onChat = (text) => send({ type: 'chat', text })
   handlers.onDisconnect = disconnect
 }

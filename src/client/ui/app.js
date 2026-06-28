@@ -20,6 +20,8 @@ const require = createRequire(import.meta.url)
 const VERSION = require('../../../package.json').version
 
 const LEFT_W = 22            // inner width of the left (rooms) panel
+const USERS_W = 22          // inner width of the middle "who's here" column (3-col layout)
+const THREE_COL_MIN = 70    // terminal width at/above which the middle column is shown
 const MAX_USERNAME = 16       // short chars; server-side slice(0, 32) lets it through
 const MAX_ROOMNAME = 20       // short enough to fit a sidebar row: `▸ <name> <count>` in LEFT_W
 
@@ -42,11 +44,17 @@ export const state = {
   serverAddr: null,
   talking: new Set(),
   selfLevel: 0,              // live mic level of the local user (0..1)
+  chat: {},                  // roomName → message[] ({userId,name,text,ts}). Local mirror, survives reconnect.
+  unread: {},                // roomName → count of unseen messages (badge in the left panel)
 }
 
 export const handlers = {
-  onJoin: null, onLeave: null, onCreate: null, onDelete: null, onMute: null, onForcedLeave: null, onDisconnect: null,
+  onJoin: null, onLeave: null, onCreate: null, onDelete: null, onMute: null, onForcedLeave: null, onDisconnect: null, onChat: null,
 }
+
+const CHAT_CAP = 200         // messages kept per room client-side (matches the host)
+const MAX_CHATMSG = 300      // max characters per outgoing message
+const chatKey = (m) => `${m.ts}-${m.userId}-${m.text}`
 
 let audioApi = null          // injected via registerAudio()
 let updateAvailable = false  // set by checkForUpdate() after startup — remote version is newer
@@ -69,6 +77,8 @@ const ui = {
   roomItems: [],             // left-panel navigation [{ type:'room'|'user'|'newRoom', ... }]
   selectedLine: 0,           // index into roomItems
   statusZones: [],           // clickable status-bar segments
+  chat: { input: '', scroll: 0, stick: true, focused: false },  // chat composer + history scroll
+  chatZone: null,            // clickable chat region [{x0,x1,y0,y1}] for focusing the composer
 }
 
 // ─── Drawing primitives ───────────────────────────────────────────────────────
@@ -113,15 +123,27 @@ function makeScreen() {
 }
 
 // ─── Layout ────────────────────────────────────────────────────────────────
+// Three responsive columns: rooms │ who's-here │ chat. When the terminal is too
+// narrow for all three, the middle column collapses (members are still visible
+// in the left tree) and chat takes the whole right side.
 function L() {
   const W = ui.sb.width, H = ui.sb.height
-  const divX = LEFT_W + 1
   const headerRow = 1, ulineRow = 2, firstRow = 3
   const sepRow = H - 3, statusRow = H - 2
   const lastRow = sepRow - 1
-  const rightX = divX + 2
-  const rightW = Math.max(4, W - rightX - 2)
-  return { W, H, divX, headerRow, ulineRow, firstRow, sepRow, statusRow, lastRow, rightX, rightW }
+  const divX = LEFT_W + 1                 // first divider: rooms │ rest
+  const threeCol = W >= THREE_COL_MIN
+  let usersX = 0, usersW = 0, midDiv = null, chatX, chatW
+  if (threeCol) {
+    usersX = divX + 2
+    usersW = USERS_W
+    midDiv = usersX + usersW              // second divider: who's-here │ chat
+    chatX = midDiv + 2
+  } else {
+    chatX = divX + 2
+  }
+  chatW = Math.max(8, W - chatX - 2)
+  return { W, H, divX, threeCol, usersX, usersW, midDiv, chatX, chatW, headerRow, ulineRow, firstRow, sepRow, statusRow, lastRow }
 }
 
 // ─── Render ────────────────────────────────────────────────────────────────
@@ -131,7 +153,8 @@ function drawAll() {
   sb.fill({ char: ' ', attr: {} })
   drawFrame()
   drawRooms()
-  drawUsers()
+  drawUsers()                // middle column (no-op when too narrow)
+  drawChat()                 // right column
   drawStatus()
   if (ui.modal) drawModal()
   if (ui.prompt) drawPrompt()
@@ -148,7 +171,7 @@ function drawAll() {
 }
 
 function drawFrame() {
-  const { W, H, divX, headerRow, ulineRow, sepRow, statusRow, lastRow, rightX, rightW } = L()
+  const { W, H, divX, threeCol, usersX, usersW, midDiv, chatX, chatW, headerRow, ulineRow, sepRow, statusRow, lastRow } = L()
   const dim = { dim: true }
 
   // top + bottom borders
@@ -163,25 +186,35 @@ function drawFrame() {
   putStr(sx, 0, '●', state.connected ? { color: 'green' } : { color: 'red' })
   putStr(sx + 2, 0, txt, dim)
 
-  // side borders + divider
+  // side borders + column dividers
   for (let y = 1; y <= statusRow; y++) { putStr(0, y, '│', dim); putStr(W - 1, y, '│', dim) }
   for (let y = 1; y <= lastRow; y++) putStr(divX, y, '│', dim)
+  if (threeCol) for (let y = 1; y <= lastRow; y++) putStr(midDiv, y, '│', dim)
 
-  // separator above status bar
+  // separator above status bar, with ┴ joins under each divider
   putStr(0, sepRow, '├' + '─'.repeat(W - 2) + '┤', dim)
   putStr(divX, sepRow, '┴', dim)
+  if (threeCol) putStr(midDiv, sepRow, '┴', dim)
 
   // headers
   putStr(2, headerRow, 'ROOMS', { bold: true })
-  const room = state.rooms.find(r => r.name === state.currentRoom)
-  const title = state.currentRoom || 'no room joined'
-  putStr(rightX, headerRow, title, state.currentRoom ? { color: 'cyan', bold: true } : dim)
-  if (room) {
-    const cnt = `${room.users.length} online`
-    putStr(W - 2 - cnt.length, headerRow, cnt, dim)
-  }
   putStr(2, ulineRow, '─'.repeat(LEFT_W - 1), dim)
-  putStr(rightX, ulineRow, '─'.repeat(rightW), dim)
+  const room = state.rooms.find(r => r.name === state.currentRoom)
+  const titleAttr = state.currentRoom ? { color: 'cyan', bold: true } : dim
+  const title = state.currentRoom || 'no room'
+  if (threeCol) {
+    // middle = room / who's-here, right = chat
+    putStr(usersX, headerRow, padEnd(title, usersW), titleAttr)
+    if (room) { const cnt = String(room.users.length); putStr(midDiv - 1 - cnt.length, headerRow, cnt, dim) }
+    putStr(usersX, ulineRow, '─'.repeat(usersW), dim)
+    putStr(chatX, headerRow, 'chat', { bold: true })
+    putStr(chatX, ulineRow, '─'.repeat(chatW), dim)
+  } else {
+    // narrow: chat column is headed by the room title (+ online count)
+    putStr(chatX, headerRow, title, titleAttr)
+    if (room) { const cnt = `${room.users.length} online`; putStr(W - 2 - cnt.length, headerRow, cnt, dim) }
+    putStr(chatX, ulineRow, '─'.repeat(chatW), dim)
+  }
 }
 
 function drawRooms() {
@@ -237,6 +270,13 @@ function drawRooms() {
       const attr = sel ? { bgColor: 'cyan', color: 'black' }
                  : cur ? { color: 'green', bold: true } : {}
       putStr(1, y, padEnd(line, LEFT_W), attr)
+      // Unread chat badge (only for rooms you're not currently in).
+      const unread = state.unread[item.name] || 0
+      if (unread > 0 && !cur) {
+        const badge = '●' + (unread > 9 ? '9+' : unread)
+        const bx = 1 + Math.max(0, LEFT_W - count.length - badge.length - 1)
+        putStr(bx, y, badge, sel ? { color: 'yellow', bold: true, bgColor: 'cyan' } : { color: 'yellow', bold: true })
+      }
     } else if (item.type === 'user') {
       const branch = item.last ? '  └─ ' : '  ├─ '
       const name = item.self ? `${item.username} (you)` : item.username
@@ -257,12 +297,15 @@ function drawRooms() {
   ui.newRoomY = lastRow
 }
 
+// Middle column — "who's here" + your mic meter. Only drawn in the 3-column
+// layout; when narrower the roster is covered by the left tree.
 function drawUsers() {
-  const { rightX, rightW, firstRow, lastRow } = L()
+  const { usersX, usersW, threeCol, firstRow, lastRow } = L()
   ui.userZones = []
+  if (!threeCol) return
 
   if (!state.currentRoom) {
-    putStr(rightX, Math.floor((firstRow + lastRow) / 2), 'Select a room on the left and press Enter to join.', { dim: true })
+    putStr(usersX, Math.floor((firstRow + lastRow) / 2), 'no room', { dim: true })
     return
   }
 
@@ -274,38 +317,104 @@ function drawUsers() {
   drawUserRow(y++, state.username + ' (you)', {
     self: true, muted: state.muted,
     talking: !state.muted && state.selfLevel > 0.05,
-  })
+  }, usersX, usersW)
   for (const u of others) {
     if (y > lastRow - 1) break
-    drawUserRow(y, u.name, { talking: state.talking.has(u.id), muted: u.muted, seed: u.id })
-    ui.userZones.push({ x0: rightX, x1: rightX + rightW, y, userId: u.id, username: u.name })
+    drawUserRow(y, u.name, { talking: state.talking.has(u.id), muted: u.muted, seed: u.id }, usersX, usersW)
+    ui.userZones.push({ x0: usersX, x1: usersX + usersW, y, userId: u.id, username: u.name })
     y++
   }
 
-  // Dedicated mic-level bar pinned at the bottom of the panel.
-  const label = state.muted ? 'your mic · muted' : 'your mic'
-  putStr(rightX, lastRow, label, state.muted ? { color: 'red', dim: true } : { dim: true })
-  const meterX = rightX + 17
-  const meterW = Math.max(8, rightW - 19)
-  const lvl = state.muted ? 0 : state.selfLevel
-  putStr(meterX, lastRow, bar(lvl, meterW), levelAttr(lvl))
+  // Mic-level bar pinned at the bottom of the column.
+  if (state.muted) {
+    putStr(usersX, lastRow, 'your mic · muted', { color: 'red', dim: true })
+  } else {
+    putStr(usersX, lastRow, 'your mic', { dim: true })
+    const meterX = usersX + 9
+    const meterW = Math.max(4, usersX + usersW - meterX)
+    putStr(meterX, lastRow, bar(state.selfLevel, meterW), levelAttr(state.selfLevel))
+  }
 }
 
-function drawUserRow(y, name, o) {
-  const { rightX, rightW } = L()
+function drawUserRow(y, name, o, colX, colW) {
   const icon = o.muted ? '⊘' : (o.talking ? '◉' : '○')
   const iconAttr = o.muted ? { color: 'red' } : (o.talking ? { color: 'green', bold: true } : { dim: true })
-  putStr(rightX, y, icon, iconAttr)
+  putStr(colX, y, icon, iconAttr)
+  // Narrow column: icon + name only. Talking/mute is conveyed by the icon colour.
+  const nameW = Math.max(4, colW - 3)
+  const nameAttr = o.self ? { color: 'cyan', bold: true } : (o.talking ? { color: 'green', bold: true } : o.muted ? { dim: true } : {})
+  putStr(colX + 2, y, padEnd(name, nameW), nameAttr)
+}
 
-  const nameAttr = o.self ? { color: 'cyan', bold: true } : (o.talking ? { bold: true } : {})
-  putStr(rightX + 2, y, padEnd(name, 16), nameAttr)
+// Word-wrap one chat message ("name: text") to `width`, hard-breaking overlong
+// tokens. Own messages are tinted green so authorship reads at a glance.
+function wrapChatLine(name, text, width, own) {
+  const attr = own ? { color: 'green' } : {}
+  const out = []
+  let line = ''
+  for (let w of (name + ': ' + text).split(' ')) {
+    while (w.length > width) {                      // a single token longer than the column
+      if (line) { out.push({ text: line, attr }); line = '' }
+      out.push({ text: w.slice(0, width), attr })
+      w = w.slice(width)
+    }
+    if (!line) line = w
+    else if ((line + ' ' + w).length <= width) line += ' ' + w
+    else { out.push({ text: line, attr }); line = w }
+  }
+  out.push({ text: line, attr })
+  return out
+}
 
-  const statusX = rightX + 19
-  const meterW = Math.max(6, Math.min(14, rightW - 21))
-  if (o.muted)        putStr(statusX, y, 'muted', { color: 'red', dim: true })
-  else if (o.self)    putStr(statusX, y, o.talking ? 'speaking' : 'idle', { color: 'cyan', dim: !o.talking })
-  else if (o.talking) putStr(statusX, y, animBars(o.seed || 1, meterW), { color: 'green' })
-  else                putStr(statusX, y, 'idle', { dim: true })
+// Right column — the current room's chat: scrollable history + a composer line.
+function drawChat() {
+  const { chatX, chatW, firstRow, lastRow } = L()
+  ui.chatZone = { x0: chatX, x1: chatX + chatW, y0: firstRow, y1: lastRow }
+
+  const composerY = lastRow
+  const divY = lastRow - 1
+  const histTop = firstRow
+  const innerH = Math.max(1, divY - histTop)        // history rows: firstRow .. divY-1
+
+  if (!state.currentRoom) {
+    putStr(chatX, Math.floor((firstRow + lastRow) / 2), 'join a room to chat', { dim: true })
+    return
+  }
+
+  // Wrap every message into display lines.
+  const msgs = state.chat[state.currentRoom] || []
+  const lines = []
+  for (const m of msgs) {
+    for (const l of wrapChatLine(m.name || '?', m.text, chatW, m.userId === state.userId)) lines.push(l)
+  }
+
+  const maxScroll = Math.max(0, lines.length - innerH)
+  if (ui.chat.stick) {
+    ui.chat.scroll = maxScroll
+  } else {
+    ui.chat.scroll = Math.min(Math.max(0, ui.chat.scroll), maxScroll)
+    if (ui.chat.scroll >= maxScroll) ui.chat.stick = true   // scrolled back to bottom → re-stick
+  }
+  const top = ui.chat.scroll
+
+  for (let i = 0; i < innerH; i++) {
+    const ln = lines[top + i]
+    putStr(chatX, histTop + i, padEnd(ln ? ln.text : '', chatW), ln ? ln.attr : {})
+  }
+  if (top > 0) putStr(chatX + chatW - 1, histTop, '▲', { dim: true })
+  if (top + innerH < lines.length) putStr(chatX + chatW - 1, divY - 1, '▼', { dim: true })
+
+  // Divider + composer.
+  putStr(chatX, divY, '─'.repeat(chatW), { dim: true })
+  const focused = ui.chat.focused
+  const empty = !ui.chat.input && !focused
+  if (empty) {
+    putStr(chatX, composerY, padEnd('> type a message… (Tab)', chatW), { dim: true })
+  } else {
+    const avail = Math.max(1, chatW - 2 - (focused ? 1 : 0))
+    const shown = ui.chat.input.length > avail ? ui.chat.input.slice(ui.chat.input.length - avail) : ui.chat.input
+    putStr(chatX, composerY, padEnd('> ' + shown + (focused ? '█' : ''), chatW), {})
+  }
 }
 
 function drawStatus() {
@@ -652,11 +761,13 @@ function handleKey(name, matches, data) {
   if (ui.confirm) return handleConfirmKey(name)
   if (ui.prompt) return handlePromptKey(name, data)
   if (ui.modal)  return handleModalKey(name, data)
+  if (ui.chat.focused) return handleChatKey(name, data)   // typing — shield single-key shortcuts
 
   switch (name) {
     case 'UP':    move(-1); break
     case 'DOWN':  move(1); break
     case 'ENTER': activateSelection(); break
+    case 'TAB':   if (state.currentRoom) { ui.chat.focused = true; ui.dirty = true } break
     case 'ESCAPE': if (state.currentRoom && handlers.onLeave) { notifyLeaving(); handlers.onLeave(); } break
     case 'm': case 'M': toggleMute(); break
     case 's': case 'S': openSettings(); break
@@ -666,6 +777,29 @@ function handleKey(name, matches, data) {
     case 'u': case 'U': if (updateAvailable) runUpdate(); break
     case 'q': case 'Q': quit(); break
   }
+}
+
+function chatScroll(d) {
+  ui.chat.stick = false
+  ui.chat.scroll = Math.max(0, ui.chat.scroll + d)   // upper bound + re-stick handled in drawChat
+  ui.dirty = true
+}
+
+function handleChatKey(name, data) {
+  const c = ui.chat
+  if (name === 'ESCAPE' || name === 'TAB')  { c.focused = false; ui.dirty = true; return }
+  if (name === 'ENTER') {
+    const text = c.input.trim()
+    if (text && handlers.onChat) handlers.onChat(text)
+    c.input = ''; c.stick = true; ui.dirty = true
+    return
+  }
+  if (name === 'BACKSPACE')   { c.input = c.input.slice(0, -1); ui.dirty = true; return }
+  if (name === 'UP')          return chatScroll(-1)
+  if (name === 'DOWN')        return chatScroll(1)
+  if (name === 'PAGE_UP')     return chatScroll(-5)
+  if (name === 'PAGE_DOWN')   return chatScroll(5)
+  if (data?.isCharacter && c.input.length < MAX_CHATMSG) { c.input += String.fromCodePoint(data.codepoint); ui.dirty = true }
 }
 
 function handlePromptKey(name, data) {
@@ -732,11 +866,22 @@ function handleMouse(name, data) {
   }
   if (ui.modal) return handleModalMouse(name, x, y)
 
-  if (name === 'MOUSE_WHEEL_UP')   { move(-1); return }
-  if (name === 'MOUSE_WHEEL_DOWN') { move(1);  return }
+  // Wheel over the chat pane scrolls chat; elsewhere it navigates rooms.
+  if (name === 'MOUSE_WHEEL_UP' || name === 'MOUSE_WHEEL_DOWN') {
+    const z = ui.chatZone
+    if (z && x >= z.x0 && x <= z.x1 && y >= z.y0 && y <= z.y1) chatScroll(name === 'MOUSE_WHEEL_UP' ? -2 : 2)
+    else move(name === 'MOUSE_WHEEL_UP' ? -1 : 1)
+    return
+  }
   if (name !== 'MOUSE_LEFT_BUTTON_PRESSED') return
 
   const { firstRow, lastRow, divX, statusRow } = L()
+
+  // Click in the chat pane focuses the composer; any other click defocuses it.
+  const cz = ui.chatZone
+  const inChat = cz && x >= cz.x0 && x <= cz.x1 && y >= cz.y0 && y <= cz.y1
+  ui.chat.focused = !!(inChat && state.currentRoom)
+  if (inChat) { ui.dirty = true; return }
 
   // Check clicks on user rows (volume popup)
   for (const z of ui.userZones) {
@@ -1093,6 +1238,12 @@ export function updateState(patch) {
   if (patch.rooms !== undefined) {
     notifyRoomsChanged(patch.rooms, patch.currentRoom ?? state.currentRoom, patch.userId ?? state.userId)
   }
+  // Entering a (different) room: clear its unread badge, reset the chat view and draft.
+  if (patch.currentRoom && patch.currentRoom !== state.currentRoom) {
+    delete state.unread[patch.currentRoom]
+    ui.chat.scroll = 0; ui.chat.stick = true; ui.chat.input = ''
+  }
+  if ('currentRoom' in patch && !patch.currentRoom) ui.chat.focused = false   // left the room
   Object.assign(state, patch)
   ui.dirty = true
 }
@@ -1102,6 +1253,35 @@ export function markTalking(userId, active) {
   else state.talking.delete(userId)
   ui.dirty = true
 }
+
+// ─── Chat (net → UI) ───────────────────────────────────────────────────────────
+function pushChat(room, msg) {
+  const list = state.chat[room] || (state.chat[room] = [])
+  if (list.some(m => chatKey(m) === chatKey(msg))) return false   // dedupe (echo / mirror overlap)
+  list.push(msg)
+  if (list.length > CHAT_CAP) list.splice(0, list.length - CHAT_CAP)
+  return true
+}
+
+// One new message relayed from the host.
+export function addChatMessage(room, msg) {
+  if (!room || !msg) return
+  const added = pushChat(room, msg)
+  if (added && room !== state.currentRoom) state.unread[room] = (state.unread[room] || 0) + 1
+  ui.dirty = true
+}
+
+// Backlog (on join) or a host handing us history — merge, dedupe, keep order.
+export function mergeChatHistory(room, messages) {
+  if (!room || !Array.isArray(messages)) return
+  for (const m of messages) pushChat(room, m)
+  const list = state.chat[room]
+  if (list) list.sort((a, b) => a.ts - b.ts)
+  ui.dirty = true
+}
+
+// Our local mirror, handed to a freshly-promoted host to seed its history.
+export function getChatMirror() { return state.chat }
 
 export function setSelfLevel(l) { state.selfLevel = Math.max(state.selfLevel, l); ui.dirty = true }
 

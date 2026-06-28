@@ -1,7 +1,9 @@
 import { WebSocketServer } from 'ws'
 import dgram from 'dgram'
 import { randomBytes } from 'crypto'
-import { rooms, addRoom, deleteRoom, DEFAULTS } from './rooms.js'
+import { rooms, addRoom, deleteRoom, appendChat, getChat, seedChat, DEFAULTS } from './rooms.js'
+
+export { seedChat }   // re-exported so index.js can seed history on host promotion
 
 export const DEFAULT_PORT = 4747
 export const AUDIO_PORT = 4749        // UDP voice relay (4748 is discovery)
@@ -50,6 +52,7 @@ function handleSignal(ws, msg) {
     if (!rooms.has(name)) addRoom(name)
     client.room = name
     send(ws, { type: 'joined', room: name })
+    send(ws, { type: 'chat_history', room: name, messages: getChat(name) })   // backlog for the joiner
     broadcast({ type: 'rooms', list: roomList() })
   } else if (msg.type === 'leave') {
     client.room = null
@@ -76,6 +79,20 @@ function handleSignal(ws, msg) {
   } else if (msg.type === 'mute') {
     client.muted = !!msg.muted
     broadcast({ type: 'user_mute', userId: client.id, muted: client.muted })
+  } else if (msg.type === 'chat') {
+    if (!client.room) return
+    const text = String(msg.text || '').trim().slice(0, 300)
+    if (!text) return
+    // Server-authoritative record — never trust client-supplied id/name/ts.
+    const record = { userId: client.id, name: client.username, text, ts: Date.now() }
+    appendChat(client.room, record)
+    // Relay to everyone in the room INCLUDING the sender (so it renders the same
+    // for all). Room-scoped, so not broadcast().
+    for (const c of clients.values()) {
+      if (c.room === client.room && c.ws.readyState === 1) {
+        send(c.ws, { type: 'chat', room: client.room, msg: record })
+      }
+    }
   }
 }
 

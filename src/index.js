@@ -56,10 +56,10 @@ else if (command === 'setup') {
 
 // ── Client mode ───────────────────────────────────────────────────────────────
 else {
-  const { startUI, handlers, registerAudio, registerShutdown, setSelfLevel } = await import('./client/ui/app.js')
+  const { startUI, handlers, registerAudio, registerShutdown, setSelfLevel, getChatMirror } = await import('./client/ui/app.js')
   const { connectManaged, wireHandlers, setAudioQueue, sendAudio } = await import('./client/network/ws-client.js')
   const { discover, startResponder } = await import('./net/discovery.js')
-  const { startWsServer, startAudioRelay, DEFAULT_PORT, AUDIO_PORT } = await import('./server/ws-server.js')
+  const { startWsServer, startAudioRelay, seedChat, DEFAULT_PORT, AUDIO_PORT } = await import('./server/ws-server.js')
   const audio = await import('./client/audio/index.js')
   const { startCapture, stopCapture, getInputDevices, setInputDevice, startMicTest, audioEvents } = audio
 
@@ -158,6 +158,7 @@ else {
       wss = await startWsServer(DEFAULT_PORT)
       responder = startResponder(DEFAULT_PORT)
       audioRelay = startAudioRelay(AUDIO_PORT)
+      try { seedChat(getChatMirror()) } catch {}   // carry our mirrored chat history into the new host
       hosting = true
       return `ws://127.0.0.1:${DEFAULT_PORT}`
     } catch {

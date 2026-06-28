@@ -6,6 +6,36 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.3.0
+
+### Русский
+- Текстовый чат для каждой румы со своей историей. Раскладка стала трёхколоночной
+  и адаптивной: слева румы — в центре кто в руме — справа чат этой румы. На узких
+  окнах средняя колонка сворачивается (участники видны в дереве слева), а чат
+  занимает всю правую часть.
+- Печать: Tab фокусирует поле ввода (или клик по чату), Enter отправляет, Esc/Tab
+  убирают фокус. Пока печатаешь, одиночные шорткаты (m/s/n/d/q) не срабатывают.
+  История прокручивается стрелками/PageUp-Down и колесом мыши, прилипает к низу.
+- История хранится у хоста (последние ~200 сообщений на руму, в conf — переживает
+  перезапуск) и **переживает смену хоста**: клиенты держат своё зеркало, и новый
+  хост подхватывает историю из него. При входе в руму прилетает бэклог.
+- Непрочитанные сообщения в других румах показываются жёлтым бейджем рядом с
+  румой в левой панели; сбрасывается при заходе в руму. Без звука.
+
+### English
+- Per-room text chat, each room with its own history. The layout is now three
+  responsive columns: rooms on the left — who's in the room in the middle — that
+  room's chat on the right. On narrow terminals the middle column collapses
+  (members stay visible in the left tree) and chat takes the whole right side.
+- Typing: Tab focuses the composer (or click the chat), Enter sends, Esc/Tab
+  unfocus. While typing, single-key shortcuts (m/s/n/d/q) are suppressed. History
+  scrolls with arrows/PageUp-Down and the mouse wheel, and sticks to the bottom.
+- History is kept on the host (last ~200 messages per room, in conf — survives a
+  host restart) and **survives a host change**: clients keep a local mirror and a
+  newly-promoted host seeds from it. Joining a room delivers the backlog.
+- Unread messages in other rooms show as a yellow badge next to the room in the
+  left panel; cleared when you enter the room. No sound.
+
 ## 0.2.100
 
 ### Русский
