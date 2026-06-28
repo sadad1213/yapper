@@ -1050,7 +1050,10 @@ async function runUpdate() {
 // Relaunch the freshly installed yapper in place, then exit this (old) process.
 // spawnSync runs sequentially so there's no overlap between the two on screen.
 async function restartApp() {
-  teardownTerminal()
+  teardownTerminal()                       // also RST-terminates our client ws
+  // Free the host ports before we freeze this process in spawnSync, or the new
+  // instance can't bind them and spins forever on "connect…".
+  try { if (networkShutdown) await networkShutdown() } catch {}
   try {
     const { spawnSync } = await import('child_process')
     // Re-run exactly how we were launched: node + the same script and args. This
@@ -1082,6 +1085,11 @@ export function markTalking(userId, active) {
 export function setSelfLevel(l) { state.selfLevel = Math.max(state.selfLevel, l); ui.dirty = true }
 
 export function registerAudio(api) { audioApi = api }
+
+let networkShutdown = null
+// index.js registers a hook that closes the host's WS server + discovery
+// responder so a relaunched instance can re-bind those ports.
+export function registerShutdown(fn) { networkShutdown = fn }
 
 function loop() {
   state.selfLevel = Math.max(0, state.selfLevel - 0.06)   // smooth release

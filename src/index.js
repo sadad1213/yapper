@@ -56,7 +56,7 @@ else if (command === 'setup') {
 
 // ── Client mode ───────────────────────────────────────────────────────────────
 else {
-  const { startUI, handlers, registerAudio, setSelfLevel } = await import('./client/ui/app.js')
+  const { startUI, handlers, registerAudio, registerShutdown, setSelfLevel } = await import('./client/ui/app.js')
   const { connectManaged, wireHandlers, setAudioQueue, sendAudio } = await import('./client/network/ws-client.js')
   const { discover, startResponder } = await import('./net/discovery.js')
   const { startWsServer, DEFAULT_PORT } = await import('./server/ws-server.js')
@@ -120,6 +120,29 @@ else {
   }
 
   let hosting = false
+  let wss = null            // WebSocketServer when we're the host (else null)
+  let responder = null      // discovery responder handle when hosting
+
+  // Release the host's ports (WS 4747 + discovery 4748) so a relaunched instance
+  // can re-bind them. Without this, a [R] restart leaves the old process holding
+  // the ports while its event loop is frozen by spawnSync, so the new process
+  // can neither connect nor host → endless "connect…". Clients are RST-terminated
+  // (no TIME_WAIT) and we await the listen socket's close before returning.
+  registerShutdown(async () => {
+    try { responder?.stop() } catch {}
+    responder = null
+    const server = wss
+    wss = null
+    if (!server) return
+    try { for (const c of server.clients) { try { c.terminate() } catch {} } } catch {}
+    await new Promise((resolve) => {
+      let done = false
+      const fin = () => { if (!done) { done = true; resolve() } }
+      try { server.close(fin) } catch { fin() }
+      setTimeout(fin, 800)   // safety: never hang the restart if close stalls
+    })
+  })
+
   async function resolveUrl() {
     if (explicitUrl) return explicitUrl
     if (hosting) return `ws://127.0.0.1:${DEFAULT_PORT}`
@@ -129,8 +152,8 @@ else {
 
     // Nobody is hosting — try to become the host.
     try {
-      await startWsServer(DEFAULT_PORT)
-      startResponder(DEFAULT_PORT)
+      wss = await startWsServer(DEFAULT_PORT)
+      responder = startResponder(DEFAULT_PORT)
       hosting = true
       return `ws://127.0.0.1:${DEFAULT_PORT}`
     } catch {

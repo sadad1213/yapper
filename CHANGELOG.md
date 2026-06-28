@@ -6,6 +6,28 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.90
+
+### Русский
+- Фикс: после обновления и [R] restart больше нет бесконечного «connect…» с
+  пустым списком комнат и оффлайном. Причина — если ты был хостом (`127.0.0.1:4747`),
+  старый процесс при `spawnSync` оставался жив с замороженным event loop и держал
+  занятыми порты 4747 (WS) и 4748 (discovery): новый процесс не мог ни
+  подключиться (старый сервер не отвечал), ни сам стать хостом. Теперь перед
+  перезапуском хост-порты корректно освобождаются — сервер и discovery-responder
+  закрываются, клиентские соединения рвутся через RST (без TIME_WAIT), и закрытие
+  слушающего сокета ждётся до конца. Запуск через `yapper` работал и раньше.
+
+### English
+- Fix: after an update + [R] restart there's no more endless "connect…" with an
+  empty room list and offline state. Cause — if you were the host
+  (`127.0.0.1:4747`), the old process stayed alive under spawnSync with a frozen
+  event loop, holding ports 4747 (WS) and 4748 (discovery): the new process could
+  neither connect (the old server didn't answer) nor become host itself. The host
+  ports are now released before restart — the server and discovery responder are
+  closed, client sockets are RST-terminated (no TIME_WAIT), and the listening
+  socket's close is awaited. Launching via `yapper` worked already.
+
 ## 0.2.9
 
 ### Русский
