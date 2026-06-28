@@ -6,6 +6,28 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.92
+
+### Русский
+- Фикс: после выхода из комнаты и повторного входа переставал работать микрофон
+  и не было слышно других. Причина — на бэкенде naudiodon выход звал `quit()`,
+  который рвёт общую сессию PortAudio (а с ней и поток воспроизведения) и делает
+  `AudioIO` неперезапускаемым. Теперь устройство naudiodon переживает выход из
+  комнаты: пока ты вне комнаты, звук отбрасывается, но устройство и
+  воспроизведение остаются живыми, а при возврате захват возобновляется. Полное
+  освобождение осталось только при смене микрофона. Заодно починился тот же баг
+  по цепочке «mic-тест → вход в комнату». SoX это не затрагивало.
+
+### English
+- Fix: after leaving a room and re-joining, the mic stopped working and you
+  couldn't hear anyone. On the naudiodon backend, leaving called `quit()`, which
+  tears down the shared PortAudio session (and with it the playback stream) and
+  leaves the `AudioIO` un-restartable. The naudiodon device now survives a room
+  leave: while you're outside a room its audio is discarded, but the device and
+  playback stay alive, and capture resumes on re-join. A full release now only
+  happens on input-device change. This also fixes the same bug via the
+  "mic test → join a room" path. SoX was unaffected.
+
 ## 0.2.91
 
 ### Русский

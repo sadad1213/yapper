@@ -28,6 +28,11 @@ export class Capture extends EventEmitter {
     this.active = false
     this._hangover = 0      // frames left to keep transmitting after silence
     this._preRoll = []      // recent silent frames, flushed on the next onset
+    // When set, stop() keeps the device open (see stop()) instead of releasing
+    // it — required for naudiodon, whose quit() can't be undone.
+    this.keepAlive = false
+    this._streamStarted = false
+    this._drain = () => {}  // discards audio while kept alive but outside a room
   }
 
   start() {
@@ -35,17 +40,37 @@ export class Capture extends EventEmitter {
     this.active = true
     this._hangover = 0
     this._preRoll.length = 0
+    this.stream.removeListener('data', this._drain)   // stop discarding
     this.stream.on('data', this._bound)
-    if (this.stream.start) this.stream.start()
+    // Only (re)start the underlying device when it isn't already running. A
+    // keep-alive stop leaves a naudiodon stream running (just detached), and its
+    // AudioIO is single-shot — calling start() on it twice would throw. SoX is
+    // released on stop, so _streamStarted is false there and it respawns.
+    if (!this._streamStarted) {
+      if (this.stream.start) this.stream.start()
+      this._streamStarted = true
+    }
   }
 
-  stop() {
+  // A normal stop releases the device (quit()). When `keepAlive` is set the
+  // device is kept open instead — naudiodon's quit() also tears down the shared
+  // PortAudio session (killing playback) and can't be restarted, so leaving a
+  // room must not quit it. In that case we keep the stream flowing into a drain
+  // listener so audio is discarded (not buffered) until the next start().
+  // `force: true` overrides keepAlive for a true release (device change / quit).
+  stop({ force = false } = {}) {
     this.active = false
     this.stream.removeListener('data', this._bound)
     this._buf = Buffer.alloc(0)
     this._hangover = 0
     this._preRoll.length = 0
-    if (this.stream.quit) this.stream.quit()
+    if (!force && this.keepAlive) {
+      this.stream.on('data', this._drain)
+    } else {
+      this.stream.removeListener('data', this._drain)
+      if (this.stream.quit) this.stream.quit()
+      this._streamStarted = false
+    }
   }
 
   _send(frame) {

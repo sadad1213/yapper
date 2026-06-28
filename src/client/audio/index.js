@@ -50,6 +50,10 @@ function hasSox() {
 
 function attachCapture(inStream) {
   captureInstance = new Capture(encoder, inStream)
+  // naudiodon's device must survive a room leave: its quit() also tears down the
+  // shared PortAudio session (silencing playback) and its AudioIO can't be
+  // restarted. SoX has no such constraint, so it's released on every stop.
+  captureInstance.keepAlive = (backend === 'naudiodon')
   captureInstance.on('level', l => audioEvents.emit('level', l))
 }
 
@@ -121,7 +125,7 @@ export function setInputDevice(id) {
   selectedInputId = id
   if (backend !== 'naudiodon' && backend !== 'sox') return
   const wasActive = captureInstance?.active
-  try { captureInstance?.stop() } catch {}
+  try { captureInstance?.stop({ force: true }) } catch {}   // device change → fully release the old one
   attachCapture(makeInput(id))
   if (wasActive) captureInstance.start()
 }
