@@ -6,6 +6,12 @@ let reconnectTimer = null
 let audioQueueFn = null     // set to playback.queueFrame once audio is ready
 let resolveUrl = null       // async () => 'ws://host:port' | null  (re-runs discovery/host election)
 let stopped = false
+// The server echoes a `left` for every voluntary `leave` we send. We must NOT
+// treat that echo as a forced leave (which tears capture down): when switching
+// rooms directly the echo lands AFTER we've already re-joined and started the
+// mic, killing it. This counts leaves we initiated so we can skip the teardown
+// for their echoes; a `left` with none pending is a real server-side kick.
+let pendingLeaves = 0
 
 export function setAudioQueue(fn) {
   audioQueueFn = fn
@@ -60,6 +66,7 @@ function openSocket(url) {
   })
 
   ws.on('close', () => {
+    pendingLeaves = 0         // any unacked leaves are moot once the socket drops
     updateState({ connected: false, serverAddr: null, rooms: [], currentRoom: null })
     scheduleRetry()           // re-resolve: find the new host or become one
   })
@@ -80,10 +87,13 @@ function handleSignal(msg) {
       break
     case 'left':
       // A forced leave (room was deleted out from under us) arrives the same
-      // way as a voluntary one.  Stop capture locally without re-sending
-      // `leave` — server-side the room is already gone / nulled.
+      // way as the echo of a voluntary `leave`.  Only tear capture down for a
+      // genuine kick — for our own leave the audio was already handled by
+      // onLeave, and tearing it down here would race a directly-following
+      // re-join (room switch) and silence the mic.
       updateState({ currentRoom: null })
-      handlers.onForcedLeave?.()
+      if (pendingLeaves > 0) pendingLeaves--
+      else handlers.onForcedLeave?.()
       break
     case 'user_mute': {
       // Update muted status in the room's user list
@@ -115,7 +125,7 @@ export function disconnect() {
 // Wire up UI action handlers
 export function wireHandlers() {
   handlers.onJoin = (room) => send({ type: 'join', room })
-  handlers.onLeave = () => send({ type: 'leave' })
+  handlers.onLeave = () => { pendingLeaves++; send({ type: 'leave' }) }
   handlers.onCreate = (room) => {
     send({ type: 'create', room })
     send({ type: 'join', room })

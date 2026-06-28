@@ -6,6 +6,28 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.94
+
+### Русский
+- Настоящая причина мёртвого микрофона после смены комнаты. При прямом
+  переключении комнаты кликом `joinRoom` синхронно шлёт `leave`, затем `join` и
+  запускает захват. Но сервер отвечает на `leave` сообщением `left`, и клиент
+  трактовал любой `left` как принудительный кик → ещё раз глушил захват
+  (`onForcedLeave` → `stopCapture`) — уже ПОСЛЕ того, как вход в новую комнату
+  включил микрофон. Через ESC бага не было, потому что `left` приходил до входа.
+  Теперь клиент считает свои добровольные `leave` и пропускает их эхо, тушит
+  захват только при настоящем кике (удалённая комната).
+
+### English
+- The real cause of the dead mic after switching rooms. Clicking a room to
+  switch makes `joinRoom` synchronously send `leave`, then `join`, and start
+  capture. But the server answers `leave` with `left`, and the client treated
+  any `left` as a forced kick → it stopped capture again (`onForcedLeave`) AFTER
+  the new room had just started the mic. ESC didn't hit this because its `left`
+  arrived before the next join. The client now counts its own voluntary leaves
+  and skips their echoes, tearing capture down only on a real kick (deleted
+  room).
+
 ## 0.2.93
 
 ### Русский
