@@ -6,6 +6,23 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.9
+
+### Русский
+- Фикс: после закрытия настроек больше не остаётся висеть голубая «палка»
+  (аппаратный курсор терминала) посреди экрана. При delta-отрисовке terminal-kit
+  оставлял реальный курсор на последней перерисованной ячейке — в области только
+  что закрытой модалки, — и он был виден поверх всего. Приложение свой курсор не
+  использует (поля ввода рисуют собственный блок), поэтому теперь после каждого
+  кадра курсор принудительно прячется.
+
+### English
+- Fix: closing settings no longer leaves a stray blue bar (the hardware terminal
+  cursor) floating mid-screen. A delta draw left the real cursor on the last cell
+  it repainted — inside the just-closed modal — where it showed on top of
+  everything. The app never uses the hardware cursor (edit fields draw their own
+  block), so it's now force-hidden after every frame.
+
 ## 0.2.8
 
 ### Русский

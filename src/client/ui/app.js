@@ -140,6 +140,11 @@ function drawAll() {
   if (ui.confirm) drawConfirm()
   if (ui.update) drawUpdate()
   sb.draw({ delta: true })
+  // A delta draw leaves the real terminal cursor on the last cell it touched —
+  // e.g. mid-screen after the settings modal closes — and it shows as a stray
+  // blue bar. We never use the hardware cursor (edit fields draw their own ▆), so
+  // re-hide it every frame; hideCursor() just re-emits ?25l, it isn't state-gated.
+  term.hideCursor()
 }
 
 function drawFrame() {
