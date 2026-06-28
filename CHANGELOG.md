@@ -6,6 +6,19 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.100
+
+### Русский
+- Громкость юзера теперь применяется в реальном времени — слышно, как меняется
+  звук, пока двигаешь стрелками, а не только после закрытия попапа (в конфиг
+  по-прежнему пишется один раз при закрытии). Чувствительность и раньше работала
+  вживую — это просто подтверждаем.
+
+### English
+- Per-user volume now applies in real time — you hear the change as you adjust
+  with the arrows, not only after closing the popup (it's still saved to config
+  once on close). Sensitivity already applied live — just confirming.
+
 ## 0.2.99
 
 ### Русский

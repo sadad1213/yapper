@@ -678,8 +678,10 @@ function handlePromptKey(name, data) {
 
 function handleVolumeKey(name) {
   const v = ui.volumePopup
-  if (name === 'LEFT')        { v.vol = Math.max(0, v.vol - 10); ui.dirty = true }
-  else if (name === 'RIGHT')  { v.vol = Math.min(200, v.vol + 10); ui.dirty = true }
+  // Apply live so you hear the change while adjusting; persistence to config
+  // happens once on close to avoid a disk write per keypress.
+  if (name === 'LEFT')        { v.vol = Math.max(0, v.vol - 10);   setUserVolume(v.userId, v.vol); ui.dirty = true }
+  else if (name === 'RIGHT')  { v.vol = Math.min(200, v.vol + 10); setUserVolume(v.userId, v.vol); ui.dirty = true }
   else if (name === 'ESCAPE' || name === 'ENTER') closeVolumePopup()
 }
 
