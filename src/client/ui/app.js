@@ -26,15 +26,10 @@ const MAX_ROOMNAME = 20       // short enough to fit a sidebar row: `▸ <name> 
 // Default rooms are permanent — keep in sync with src/server/rooms.js DEFAULTS.
 const DEFAULT_ROOMS = new Set(['general', 'gaming', 'music'])
 
-const THRESHOLD_PRESETS = [
-  { value: 100,  label: 'Quiet (100)' },
-  { value: 200,  label: 'Normal (200)' },
-  { value: 400,  label: 'Loud (400)' },
-  { value: 700,  label: 'Very loud (700)' },
-  { value: 1000, label: 'Noisy (1000)' },
-  { value: 1500, label: 'Strict (1500)' },
-  { value: 2200, label: 'Max (2200)' },
-]
+// Mic sensitivity (VAD gate) — a continuous slider. Higher = you must speak
+// louder before transmitting, which keeps keyboard clatter and background noise
+// off-air. Stepped in VAD_STEP so the arrows feel like a slider.
+const VAD_MIN = 50, VAD_MAX = 3000, VAD_STEP = 50
 
 // ─── State ─────────────────────────────────────────────────────────────────
 export const state = {
@@ -383,8 +378,12 @@ function drawModal() {
   if (m.testing)        putStr(ix + 1, by + 7, bar(m.testLevel || 0, rw - 2), levelAttr(m.testLevel || 0))
   else if (m.testError) putStr(ix + 1, by + 7, 'audio backend not available', { color: 'red', dim: true })
 
-  const thr = THRESHOLD_PRESETS[m.thresholdIdx]?.label || 'Normal (200)'
-  modalField(ix, by + 8, rw, 'sensitivity', '‹ ' + thr + ' ›', m.row === 3)
+  // Row 3: mic sensitivity (VAD gate) as a slider — drag right to keep keyboard
+  // clatter and background noise off-air.
+  const slW = 16
+  const frac = (m.threshold - VAD_MIN) / (VAD_MAX - VAD_MIN)
+  const sline = padEnd('sensitivity', 11) + ' ‹ ' + bar(frac, slW) + ' › ' + m.threshold
+  putStr(ix, by + 8, padEnd(' ' + sline, rw), m.row === 3 ? { bgColor: 'cyan', color: 'black' } : {})
 
   // Row 4: noise suppression toggle. While enabled but the WASM hasn't loaded
   // yet, say so — audio passes through untouched until it's ready.
@@ -705,8 +704,8 @@ function handleModalKey(name, data) {
   switch (name) {
     case 'UP':    m.row = (m.row + 7) % 8; ui.dirty = true; break
     case 'DOWN':  m.row = (m.row + 1) % 8; ui.dirty = true; break
-    case 'LEFT':  if (m.row === 1) cycleDevice(-1); else if (m.row === 3) cycleThreshold(-1); else if (m.row === 4) toggleDenoise(); else if (m.row === 5) cycleHotkey(-1); break
-    case 'RIGHT': if (m.row === 1) cycleDevice(1); else if (m.row === 3) cycleThreshold(1); else if (m.row === 4) toggleDenoise(); else if (m.row === 5) cycleHotkey(1); break
+    case 'LEFT':  if (m.row === 1) cycleDevice(-1); else if (m.row === 3) adjustThreshold(-1); else if (m.row === 4) toggleDenoise(); else if (m.row === 5) cycleHotkey(-1); break
+    case 'RIGHT': if (m.row === 1) cycleDevice(1); else if (m.row === 3) adjustThreshold(1); else if (m.row === 4) toggleDenoise(); else if (m.row === 5) cycleHotkey(1); break
     case 'ENTER': modalActivate(); break
     case 's': case 'S': case 'q': case 'Q': case 'ESCAPE': closeSettings(); break
   }
@@ -873,8 +872,7 @@ function promptDeleteRoom() {
 function openSettings() {
   const devices = audioApi?.getInputDevices ? audioApi.getInputDevices() : [{ id: -1, name: 'default' }]
   const savedThreshold = config.get('vadThreshold', 200)
-  const presetIdx = THRESHOLD_PRESETS.findIndex(p => p.value === savedThreshold)
-  ui.modal = { row: 0, editing: false, edit: '', devices, devIdx: 0, testing: false, testLevel: 0, testError: false, thresholdIdx: presetIdx >= 0 ? presetIdx : 1, hotkeyIdx: presetIndex(config.get('muteHotkey', 'off')), checkStatus: null, updateVer: null, _checkTimer: null }
+  ui.modal = { row: 0, editing: false, edit: '', devices, devIdx: 0, testing: false, testLevel: 0, testError: false, threshold: Math.max(VAD_MIN, Math.min(VAD_MAX, savedThreshold)), hotkeyIdx: presetIndex(config.get('muteHotkey', 'off')), checkStatus: null, updateVer: null, _checkTimer: null }
   ui.dirty = true
 }
 
@@ -891,7 +889,7 @@ function modalActivate() {
   if (m.row === 0)      { m.editing = true; m.edit = state.username; ui.dirty = true }
   else if (m.row === 1) cycleDevice(1)
   else if (m.row === 2) toggleMicTest()
-  else if (m.row === 3) cycleThreshold(1)
+  else if (m.row === 3) adjustThreshold(1)
   else if (m.row === 4) toggleDenoise()
   else if (m.row === 5) cycleHotkey(1)
   else if (m.row === 6) checkUpdateNow()
@@ -919,12 +917,11 @@ function toggleMicTest() {
   else startMicTestInternal()
 }
 
-function cycleThreshold(dir) {
+function adjustThreshold(dir) {
   const m = ui.modal
-  m.thresholdIdx = (m.thresholdIdx + dir + THRESHOLD_PRESETS.length) % THRESHOLD_PRESETS.length
-  const val = THRESHOLD_PRESETS[m.thresholdIdx].value
-  config.set('vadThreshold', val)
-  setThreshold(val)
+  m.threshold = Math.max(VAD_MIN, Math.min(VAD_MAX, m.threshold + dir * VAD_STEP))
+  config.set('vadThreshold', m.threshold)
+  setThreshold(m.threshold)
   ui.dirty = true
 }
 

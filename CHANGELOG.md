@@ -6,6 +6,19 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.2.99
+
+### Русский
+- Чувствительность (порог VAD) в настройках теперь слайдер, а не фиксированные
+  пресеты: стрелки ‹ › плавно двигают порог от 50 до 3000 (шаг 50), рядом полоса
+  и текущее число. Так можно точно подобрать гейт чуть выше стука клавиш/фона.
+
+### English
+- Mic sensitivity (VAD threshold) in settings is now a slider instead of fixed
+  presets: ‹ › moves the gate smoothly from 50 to 3000 (step 50), with a bar and
+  the current number. Lets you dial the gate to sit just above keyboard/background
+  noise.
+
 ## 0.2.98
 
 ### Русский
