@@ -8,6 +8,13 @@ const outputDevice = isWin ? ['-t', 'waveaudio', '0'] : ['-d']
 
 const rawArgs = ['-t', 'raw', '-r', String(SAMPLE_RATE), '-e', 'signed-integer', '-b', '16', '-c', String(CHANNELS)]
 
+// SoX's default --buffer is 8192 bytes = 4096 samples ≈ 85 ms at 48k/16-bit/mono,
+// applied on BOTH the capture and playback processes — that's ~170 ms baked into
+// the round trip before any network. We force a small 20 ms block instead so SoX
+// hands audio off promptly. 1920 B = 960 samples = 20 ms: low latency without the
+// underrun/crackle risk that 10 ms (960 B) brings on slower machines.
+const LOW_LATENCY = ['--buffer', '1920']
+
 // On Windows, waveaudio input devices are addressed by index (0, 1, 2, …).
 function inputArgs(deviceId) {
   if (!isWin) return ['-d']
@@ -25,7 +32,7 @@ export class SoxCapture extends EventEmitter {
   start() {
     // sox [input device args] [format args] - (stdout)
     this.quit()   // kill any orphaned process from a previous start
-    this._proc = spawn('sox', [...inputArgs(this.deviceId), ...rawArgs, '-'], { stdio: ['ignore', 'pipe', 'ignore'] })
+    this._proc = spawn('sox', [...LOW_LATENCY, ...inputArgs(this.deviceId), ...rawArgs, '-'], { stdio: ['ignore', 'pipe', 'ignore'] })
     this._proc.stdout.on('data', chunk => this.emit('data', chunk))
     this._proc.on('error', err => this.emit('error', err))
   }
@@ -43,7 +50,7 @@ export class SoxPlayback {
 
   start() {
     // sox [format args] - (stdin) [output device args]
-    this._proc = spawn('sox', [...rawArgs, '-', ...outputDevice], { stdio: ['pipe', 'ignore', 'ignore'] })
+    this._proc = spawn('sox', [...LOW_LATENCY, ...rawArgs, '-', ...outputDevice], { stdio: ['pipe', 'ignore', 'ignore'] })
     this._stdin = this._proc.stdin
     this._proc.on('error', () => {})
   }

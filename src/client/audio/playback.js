@@ -2,8 +2,15 @@ import { FRAME_SIZE, FRAME_BYTES } from './capture.js'
 
 const FRAME_MS = 10         // 10ms Opus frames (see capture.js FRAME_SIZE)
 const TICK_MS = FRAME_MS / 2 // tick twice per frame so wall-clock drift correction has headroom
-const JITTER_TARGET = 3     // pre-roll frames (~30ms) to absorb network jitter
-const MAX_BUFFER = 40       // ~400ms hard cap before dropping oldest frames
+const JITTER_TARGET = 3     // pre-roll frames (~30ms) to absorb network jitter — kept
+                           // generous so a Wi-Fi jitter spike rebuffers cleanly
+                           // instead of underrunning into a crackle
+// Soft catch-up: once a user's queue is this deep, latency has genuinely drifted
+// (a burst, a stall, clock skew). Trim back to JITTER_TARGET so the delay can't
+// accumulate and stick — this doubles as the overflow guard against an unbounded
+// backlog. The threshold is well above the normal jitter range so an ordinary
+// spike never triggers a (audible) frame drop; only real drift does.
+const CATCHUP_DEPTH = 8     // ~80ms backlog → resync to the jitter target
 
 const SILENCE = Buffer.alloc(FRAME_BYTES)
 
@@ -127,8 +134,8 @@ export function playSystemSound(pcmBuf) {
   for (let i = 0; i < frameCount; i++) {
     u.frames.push(pcmBuf.slice(i * FRAME_BYTES, (i + 1) * FRAME_BYTES))
   }
-  // No MAX_BUFFER cap here — system sounds are a known finite buffer and the
-  // mixer drains them in real-time.  Capping would silently truncate longer
+  // No catch-up/cap here — system sounds are a known finite buffer and the
+  // mixer drains them in real-time.  Trimming would silently truncate longer
   // sounds (e.g. the 2 s update chime).
 
   // When we spun up the mixer just for this sound, tear it down afterwards.
@@ -157,7 +164,9 @@ export function queueFrame(userId, opusData) {
   let u = users.get(userId)
   if (!u) { u = { frames: [], playing: false }; users.set(userId, u) }
   u.frames.push(pcm)
-  if (u.frames.length > MAX_BUFFER) u.frames.splice(0, u.frames.length - MAX_BUFFER)
+  // Latency catch-up: if the backlog has drifted deep, drop down to the jitter
+  // target so the delay resyncs instead of riding high for the rest of the call.
+  if (u.frames.length > CATCHUP_DEPTH) u.frames.splice(0, u.frames.length - JITTER_TARGET)
 }
 
 function tick() {

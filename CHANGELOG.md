@@ -6,6 +6,29 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.3.5
+
+### Русский
+- Ниже задержка голоса (~0.2 с → ~0.06 с). Бэкенд SoX использовал буфер по
+  умолчанию (8192 байт ≈ 85 мс) на захвате и воспроизведении — это ~170 мс
+  лага ещё до сети. Теперь принудительно ставится блок 20 мс (`--buffer 1920`)
+  на обе стороны. Качество не тронуто: 48 кГц, 64 кбит/с, Opus complexity 10.
+- Защита от накопления задержки: если буфер воспроизведения у собеседника
+  «набухает» больше ~80 мс (всплеск, подвисание, расхождение часов), он
+  подрезается до jitter-таргета, чтобы лаг не «застревал» на всю сессию.
+  Jitter-буфер оставлен щедрым (30 мс) ради устойчивости к Wi-Fi-джиттеру.
+
+### English
+- Lower voice latency (~0.2 s → ~0.06 s). The SoX backend used the default
+  buffer (8192 bytes ≈ 85 ms) on both capture and playback — ~170 ms of lag
+  before the network even gets involved. We now force a 20 ms block
+  (`--buffer 1920`) on both sides. Quality untouched: 48 kHz, 64 kbps, Opus
+  complexity 10.
+- Latency drift guard: if a peer's playback buffer swells past ~80 ms (a burst,
+  a stall, clock skew) it's trimmed back to the jitter target so the delay
+  can't stick for the rest of the call. The jitter buffer stays generous
+  (30 ms) to ride out Wi-Fi jitter cleanly.
+
 ## 0.3.4
 
 ### Русский
