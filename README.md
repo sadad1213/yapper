@@ -68,6 +68,23 @@ host's rooms. If the host leaves, a remaining peer takes over automatically.
 Discovery uses UDP broadcast across every network interface (including VPN
 adapters), which works where mDNS/multicast usually doesn't.
 
+## Desktop app (GUI)
+
+Besides the terminal UI, yapper ships an optional **Electron desktop app** that
+shares the exact same logic (LAN discovery, host election, WebSocket signaling,
+UDP voice). It's the place for richer UI — avatars, images, and more — that a
+terminal can't do. The TUI stays the lightweight option; the GUI is a second
+front-end over one shared core (`src/client/core/store.js`).
+
+```bash
+npm install            # installs Electron + Vite + React (dev deps)
+npm run gui:dev        # run the app with hot-reload (Vite + Electron)
+npm run gui:build      # produce an installer in release/ (electron-builder)
+```
+
+A GUI instance and a TUI instance interoperate over the same protocol — they see
+each other's rooms, chat, and voice.
+
 ## Usage
 
 ```bash

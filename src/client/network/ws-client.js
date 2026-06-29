@@ -1,5 +1,5 @@
 import WebSocket from 'ws'
-import { state, handlers, updateState, markTalking, addChatMessage, mergeChatHistory } from '../ui/app.js'
+import { state, handlers, updateState, markTalking, addChatMessage, mergeChatHistory } from '../core/store.js'
 import { initUdpAudio, configureUdp, sendUdpAudio, stopUdpAudio } from './udp-audio.js'
 
 let ws = null

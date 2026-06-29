@@ -4,10 +4,13 @@ import { createRequire } from 'module'
 import { getThreshold, setThreshold } from '../audio/vad.js'
 import { setDenoiseEnabled, isDenoiseEnabled, isDenoiseAvailable } from '../audio/denoise.js'
 import { getUserVolume, setUserVolume } from '../audio/playback.js'
-import { notifyRoomsChanged, notifyUpdateFound, notifyMuted, notifyUnmuted, notifyLeaving } from '../audio/notifications.js'
+import { notifyUpdateFound, notifyMuted, notifyUnmuted, notifyLeaving } from '../audio/notifications.js'
+import { state, handlers, events, MAX_CHATMSG } from '../core/store.js'
 import { preloadAll } from '../audio/loader.js'
 import { checkForUpdate, clearPendingUpdate, checkForUpdateManual, fetchChangelog } from '../../auto-update.js'
 import { HOTKEY_PRESETS, presetIndex, setMuteHotkey, stopHotkey } from '../hotkey.js'
+import { SPLASH_TOTAL_MS, pickSplashVariant, drawSplash } from './splash.js'
+import { BG_MODES, BG_LABELS, bgCell } from './background.js'
 
 const term = termkit.terminal
 const config = new Conf({ projectName: 'yapper' })
@@ -32,30 +35,13 @@ const DEFAULT_ROOMS = new Set(['general', 'gaming', 'music'])
 // off-air. Stepped in VAD_STEP so the arrows feel like a slider.
 const VAD_MIN = 50, VAD_MAX = 3000, VAD_STEP = 50
 
-// ─── State ─────────────────────────────────────────────────────────────────
-export const state = {
-  rooms: [],                 // [{ name, users: [{id, name, muted}] }]
-  currentRoom: null,
-  username: String(config.get('username') || ('user' + (Math.floor(Math.random() * 9000) + 1000))),
-  userId: null,
-  muted: false,
-  connected: false,
-  serverAddr: null,
-  talking: new Set(),
-  selfLevel: 0,              // live mic level of the local user (0..1)
-  chat: {},                  // roomName → message[] ({userId,name,text,ts}). Local mirror, survives reconnect.
-  unread: {},                // roomName → count of unseen messages (badge in the left panel)
-}
-
-export const handlers = {
-  onJoin: null, onLeave: null, onCreate: null, onDelete: null, onMute: null, onForcedLeave: null, onDisconnect: null, onChat: null,
-}
-
-const CHAT_CAP = 200         // messages kept per room client-side (matches the host)
-const MAX_CHATMSG = 300      // max characters per outgoing message
-const chatKey = (m) => `${m.ts}-${m.userId}-${m.text}`
+// State, handlers and the network-facing mutators live in the UI-agnostic store
+// (`../core/store.js`) so the GUI can share them. Re-export the bits index.js
+// pulls from this module so its import list need not change.
+export { handlers, getChatMirror, setSelfLevel } from '../core/store.js'
 
 let audioApi = null          // injected via registerAudio()
+let bgMode = 'off'           // animated background mode (loaded from config in startUI)
 let updateAvailable = false  // set by checkForUpdate() after startup — remote version is newer
 const SEEN_KEY = 'lastSeenVersion'
 let whatsNew = false          // local VERSION differs from last seen — show "what's new" changelog
@@ -66,6 +52,8 @@ const ui = {
   sb: null,
   dirty: true,
   loopTimer: null,
+  splash: null,              // startup title animation { startedAt, variant, state }
+  transition: null,          // fade-in-from-black after the splash { startedAt }
   modal: null,               // settings overlay
   prompt: null,              // text-input overlay (new room)
   volumePopup: null,         // per-user volume overlay { userId, username, vol }
@@ -152,22 +140,86 @@ function L() {
   return { W, H, roomsW, divX, threeCol, usersX, usersW, midDiv, chatX, chatW, headerRow, ulineRow, firstRow, sepRow, statusRow, lastRow }
 }
 
+// ─── Startup splash ──────────────────────────────────────────────────────────
+// The animated "YAPPER" title lives in ./splash.js (a set of random variants —
+// shimmer, starfield, matrix rain, gradient, glitch, sparkle, neon). We hand it a
+// tiny drawing API over the screen buffer; it's skipped on any key / click.
+const splashApi = {
+  put: putStr,
+  fill: () => ui.sb.fill({ char: ' ', attr: {} }),
+  get W() { return ui.sb.width },
+  get H() { return ui.sb.height },
+}
+// When the splash ends (naturally or skipped) we don't hard-cut to the room UI —
+// the splash has just faded the title to black, so we hold that black and reveal
+// the real interface up from it over TRANSITION_MS. Terminals have no alpha, so the
+// fade is an ordered dissolve: each cell has a fixed noise threshold and only shows
+// once the eased progress passes it, so the UI materialises smoothly out of black.
+const TRANSITION_MS = 650
+function beginUiReveal() { ui.splash = null; ui.transition = { startedAt: Date.now() }; ui.dirty = true }
+function endSplash() { if (ui.splash) beginUiReveal() }
+
+// Stable per-cell noise in [0,1) — constant across frames so the dissolve order
+// holds steady (no flicker) as the reveal progresses.
+function cellNoise(x, y) {
+  const s = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453
+  return s - Math.floor(s)
+}
+
+// Black out every cell whose noise still exceeds the reveal factor f (0→1). Called
+// after the full UI is drawn, so cells "uncover" to their real content as f grows.
+function applyFadeMask(f) {
+  const sb = ui.sb, W = sb.width, H = sb.height
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (cellNoise(x, y) > f) putStr(x, y, ' ', {})
+    }
+  }
+}
+
+// Paint the chosen animated background into cells the UI left blank — empty chat
+// rows, the gap below the member list, idle areas. Reads each interior cell and
+// only fills genuine blanks, so text and borders are never touched. No-op (and
+// zero cost) when the background is off.
+function drawBackgroundLayer() {
+  if (bgMode === 'off') return
+  const { firstRow, lastRow, divX, threeCol, midDiv, W } = L()
+  const sb = ui.sb, t = Date.now()
+  for (let y = firstRow; y <= lastRow; y++) {
+    for (let x = 1; x < W - 1; x++) {
+      if (x === divX || (threeCol && x === midDiv)) continue   // skip column dividers
+      const cell = sb.get({ x, y })
+      if (!cell || cell.char !== ' ') continue                 // only blank cells
+      const c = bgCell(bgMode, x, y, t)
+      if (c) putStr(x, y, c.ch, c.attr)
+    }
+  }
+}
+
 // ─── Render ────────────────────────────────────────────────────────────────
 function drawAll() {
   const sb = ui.sb
   if (!sb) return
+  if (ui.splash) { drawSplash(splashApi, ui.splash, Date.now() - ui.splash.startedAt); sb.draw({ delta: true }); term.hideCursor(); return }
   sb.fill({ char: ' ', attr: {} })
   drawFrame()
   drawRooms()
   drawUsers()                // middle column (no-op when too narrow)
   drawChat()                 // right column
   drawStatus()
+  drawBackgroundLayer()      // animate the blank interior cells (behind overlays)
   if (ui.modal) drawModal()
   if (ui.prompt) drawPrompt()
   if (ui.volumePopup) drawVolumePopup()
   if (ui.changelog) drawChangelog()
   if (ui.confirm) drawConfirm()
   if (ui.update) drawUpdate()
+  // Fade-in-from-black after the splash: dissolve the freshly-drawn UI up out of black.
+  if (ui.transition) {
+    const p = (Date.now() - ui.transition.startedAt) / TRANSITION_MS
+    if (p >= 1) ui.transition = null
+    else applyFadeMask(p * p * (3 - 2 * p))   // smoothstep easing
+  }
   sb.draw({ delta: true })
   // A delta draw leaves the real terminal cursor on the last cell it touched —
   // e.g. mid-screen after the settings modal closes — and it shows as a stray
@@ -477,7 +529,7 @@ function drawStatus() {
 function drawModal() {
   const { W, H } = L()
   const m = ui.modal
-  const bw = Math.min(54, W - 4), bh = 20
+  const bw = Math.min(54, W - 4), bh = 22
   const bx = Math.floor((W - bw) / 2), by = Math.floor((H - bh) / 2)
   m.rect = { bx, by, bw, bh }
   const C = { color: 'cyan' }
@@ -492,7 +544,7 @@ function drawModal() {
   putStr(bx + 2, by, ' settings ', { color: 'cyan', bold: true })
 
   const ix = bx + 2, rw = bw - 4
-  m.rowsY = [by + 2, by + 4, by + 6, by + 8, by + 10, by + 12, by + 14, by + 18]
+  m.rowsY = [by + 2, by + 4, by + 6, by + 8, by + 10, by + 12, by + 14, by + 16, by + 20]
 
   const uval = (m.editing && m.row === 0) ? m.edit + '█' : state.username
   modalField(ix, by + 2, rw, 'username', uval, m.row === 0)
@@ -528,21 +580,24 @@ function drawModal() {
   const hkVal = process.platform === 'win32' ? '‹ ' + hk + ' ›' : '‹ ' + hk + ' › (Windows only)'
   modalField(ix, by + 12, rw, 'mute key', hkVal, m.row === 5)
 
-  // Row 6: check for updates — status shown inline so the button doubles as
+  // Row 6: animated background for the main screen (off / starfield / rain / aurora).
+  modalField(ix, by + 14, rw, 'background', '‹ ' + BG_LABELS[bgMode] + ' ›', m.row === 6)
+
+  // Row 7: check for updates — status shown inline so the button doubles as
   // a result line ("up to date" / "update vX available" / "check failed").
   // Sticky while there is a pending update; transient otherwise (auto-clears
   // after 4s).
-  const csel = m.row === 6
+  const csel = m.row === 7
   let cval, cattr
   if (m.checkStatus === 'checking')    { cval = '⟳ checking…';                                      cattr = { color: 'yellow' } }
   else if (m.checkStatus === 'update') { cval = '! update v' + m.updateVer + ' available — press [U]'; cattr = { color: 'yellow', bold: true } }
   else if (m.checkStatus === 'latest') { cval = '✓ you are up to date';                                cattr = { color: 'green' } }
   else if (m.checkStatus === 'failed') { cval = '× check failed (rate limit / offline)';              cattr = { color: 'red', dim: true } }
   else                                 { cval = '▶ check for updates';                               cattr = {} }
-  putStr(ix, by + 14, padEnd(' ' + cval, rw), csel ? { bgColor: 'cyan', color: 'black' } : cattr)
+  putStr(ix, by + 16, padEnd(' ' + cval, rw), csel ? { bgColor: 'cyan', color: 'black' } : cattr)
 
-  putStr(ix + 1, by + 16, '↑↓ move · enter select · ‹ › adjust · esc close', { dim: true })
-  modalField(ix, by + 18, rw, '', '[ close ]', m.row === 7)
+  putStr(ix + 1, by + 18, '↑↓ move · enter select · ‹ › adjust · esc close', { dim: true })
+  modalField(ix, by + 20, rw, '', '[ close ]', m.row === 8)
 }
 
 function modalField(ix, y, rw, label, value, sel) {
@@ -777,6 +832,7 @@ function handleChangelogMouse(name, x, y) {
 // ─── Input: keyboard ──────────────────────────────────────────────────────────
 function handleKey(name, matches, data) {
   if (name === 'CTRL_C') return quit()
+  if (ui.splash) return endSplash()        // any key skips the startup animation
   if (ui.update) return handleUpdateKey(name)
   if (ui.volumePopup) return handleVolumeKey(name)
   if (ui.changelog) return handleChangelogKey(name)
@@ -875,10 +931,10 @@ function handleModalKey(name, data) {
     return
   }
   switch (name) {
-    case 'UP':    m.row = (m.row + 7) % 8; ui.dirty = true; break
-    case 'DOWN':  m.row = (m.row + 1) % 8; ui.dirty = true; break
-    case 'LEFT':  if (m.row === 1) cycleDevice(-1); else if (m.row === 3) adjustThreshold(-1); else if (m.row === 4) toggleDenoise(); else if (m.row === 5) cycleHotkey(-1); break
-    case 'RIGHT': if (m.row === 1) cycleDevice(1); else if (m.row === 3) adjustThreshold(1); else if (m.row === 4) toggleDenoise(); else if (m.row === 5) cycleHotkey(1); break
+    case 'UP':    m.row = (m.row + 8) % 9; ui.dirty = true; break
+    case 'DOWN':  m.row = (m.row + 1) % 9; ui.dirty = true; break
+    case 'LEFT':  if (m.row === 1) cycleDevice(-1); else if (m.row === 3) adjustThreshold(-1); else if (m.row === 4) toggleDenoise(); else if (m.row === 5) cycleHotkey(-1); else if (m.row === 6) cycleBg(-1); break
+    case 'RIGHT': if (m.row === 1) cycleDevice(1); else if (m.row === 3) adjustThreshold(1); else if (m.row === 4) toggleDenoise(); else if (m.row === 5) cycleHotkey(1); else if (m.row === 6) cycleBg(1); break
     case 'ENTER': modalActivate(); break
     case 's': case 'S': case 'q': case 'Q': case 'ESCAPE': closeSettings(); break
   }
@@ -888,6 +944,7 @@ function handleModalKey(name, data) {
 function handleMouse(name, data) {
   const x = data.x - 1, y = data.y - 1   // terminal is 1-based, buffer 0-based
 
+  if (ui.splash) { if (name === 'MOUSE_LEFT_BUTTON_PRESSED') endSplash(); return }
   if (ui.update) return handleUpdateMouse(name, x, y)
   if (ui.volumePopup) {         // click anywhere outside closes
     if (name === 'MOUSE_LEFT_BUTTON_PRESSED') closeVolumePopup()
@@ -1081,8 +1138,9 @@ function modalActivate() {
   else if (m.row === 3) adjustThreshold(1)
   else if (m.row === 4) toggleDenoise()
   else if (m.row === 5) cycleHotkey(1)
-  else if (m.row === 6) checkUpdateNow()
-  else if (m.row === 7) closeSettings()
+  else if (m.row === 6) cycleBg(1)
+  else if (m.row === 7) checkUpdateNow()
+  else if (m.row === 8) closeSettings()
 }
 
 function toggleDenoise() {
@@ -1120,6 +1178,15 @@ function cycleHotkey(dir) {
   const preset = HOTKEY_PRESETS[m.hotkeyIdx]
   config.set('muteHotkey', preset.id)
   setMuteHotkey(preset.id, toggleMute)   // re-arms the global helper (no-op off Windows)
+  ui.dirty = true
+}
+
+// Cycle the animated-background mode (off / starfield / rain / aurora). Applied
+// live so the change previews behind the settings modal, and persisted.
+function cycleBg(dir) {
+  const i = (BG_MODES.indexOf(bgMode) + dir + BG_MODES.length) % BG_MODES.length
+  bgMode = BG_MODES[i]
+  config.set('bgMode', bgMode)
   ui.dirty = true
 }
 
@@ -1275,58 +1342,20 @@ async function restartApp() {
   process.exit(0)
 }
 
+// ─── Store → TUI bridge ──────────────────────────────────────────────────────
+// State and the network-facing mutators now live in ../core/store.js, which
+// emits 'change' on every mutation. React to each one here: apply the terminal-
+// only view resets (chat scroll/focus) that used to sit inside updateState, then
+// mark the screen dirty so the next loop tick redraws.
+events.on('change', (patch) => {
+  if (patch && 'currentRoom' in patch) {
+    if (patch.currentRoom) { ui.chat.scroll = 0; ui.chat.stick = true; ui.chat.input = '' }
+    else ui.chat.focused = false   // left the room
+  }
+  ui.dirty = true
+})
+
 // ─── Public API ────────────────────────────────────────────────────────────
-export function updateState(patch) {
-  if (patch.rooms !== undefined) {
-    notifyRoomsChanged(patch.rooms, patch.currentRoom ?? state.currentRoom, patch.userId ?? state.userId)
-  }
-  // Entering a (different) room: clear its unread badge, reset the chat view and draft.
-  if (patch.currentRoom && patch.currentRoom !== state.currentRoom) {
-    delete state.unread[patch.currentRoom]
-    ui.chat.scroll = 0; ui.chat.stick = true; ui.chat.input = ''
-  }
-  if ('currentRoom' in patch && !patch.currentRoom) ui.chat.focused = false   // left the room
-  Object.assign(state, patch)
-  ui.dirty = true
-}
-
-export function markTalking(userId, active) {
-  if (active) state.talking.add(userId)
-  else state.talking.delete(userId)
-  ui.dirty = true
-}
-
-// ─── Chat (net → UI) ───────────────────────────────────────────────────────────
-function pushChat(room, msg) {
-  const list = state.chat[room] || (state.chat[room] = [])
-  if (list.some(m => chatKey(m) === chatKey(msg))) return false   // dedupe (echo / mirror overlap)
-  list.push(msg)
-  if (list.length > CHAT_CAP) list.splice(0, list.length - CHAT_CAP)
-  return true
-}
-
-// One new message relayed from the host.
-export function addChatMessage(room, msg) {
-  if (!room || !msg) return
-  const added = pushChat(room, msg)
-  if (added && room !== state.currentRoom) state.unread[room] = (state.unread[room] || 0) + 1
-  ui.dirty = true
-}
-
-// Backlog (on join) or a host handing us history — merge, dedupe, keep order.
-export function mergeChatHistory(room, messages) {
-  if (!room || !Array.isArray(messages)) return
-  for (const m of messages) pushChat(room, m)
-  const list = state.chat[room]
-  if (list) list.sort((a, b) => a.ts - b.ts)
-  ui.dirty = true
-}
-
-// Our local mirror, handed to a freshly-promoted host to seed its history.
-export function getChatMirror() { return state.chat }
-
-export function setSelfLevel(l) { state.selfLevel = Math.max(state.selfLevel, l); ui.dirty = true }
-
 export function registerAudio(api) { audioApi = api }
 
 let networkShutdown = null
@@ -1335,8 +1364,16 @@ let networkShutdown = null
 export function registerShutdown(fn) { networkShutdown = fn }
 
 function loop() {
+  // Splash owns the screen until it finishes (or is skipped); animate every tick.
+  if (ui.splash) {
+    if (Date.now() - ui.splash.startedAt >= SPLASH_TOTAL_MS) beginUiReveal()
+    drawAll()
+    return
+  }
+  // Fading the room UI up from black — keep redrawing until the dissolve completes.
+  if (ui.transition) { drawAll(); return }
   state.selfLevel = Math.max(0, state.selfLevel - 0.06)   // smooth release
-  const animating = state.talking.size > 0 || ui.modal?.testing || state.selfLevel > 0.01 || ui.update?.status === 'running'
+  const animating = bgMode !== 'off' || state.talking.size > 0 || ui.modal?.testing || state.selfLevel > 0.01 || ui.update?.status === 'running'
   if (ui.dirty || animating) { drawAll(); ui.dirty = false }
 }
 
@@ -1345,6 +1382,7 @@ export function startUI() {
   config.set('username', state.username)
   setThreshold(config.get('vadThreshold', 200))
   setDenoiseEnabled(config.get('noiseSuppression', true))
+  bgMode = BG_MODES.includes(config.get('bgMode')) ? config.get('bgMode') : 'stars'
   loadVolumes()
   setMuteHotkey(config.get('muteHotkey', 'off'), toggleMute)   // arm the saved global mute key (Windows)
   term.fullscreen(true)
@@ -1359,6 +1397,8 @@ export function startUI() {
     ui.dirty = true
   })
   ui.sb = makeScreen()
+  // Play a randomly-chosen startup title animation (see ./splash.js).
+  ui.splash = { startedAt: Date.now(), variant: pickSplashVariant(), state: null }
   ui.dirty = true
   ui.loopTimer = setInterval(loop, 50)
 

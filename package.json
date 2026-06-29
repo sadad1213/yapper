@@ -1,6 +1,6 @@
 {
   "name": "yapper",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Fast, low-memory CLI voice chat for the terminal — serverless LAN, mouse-driven TUI",
   "type": "module",
   "bin": {
@@ -16,7 +16,13 @@
   ],
   "scripts": {
     "start": "node bin/yapper.js",
-    "server": "node bin/yapper.js server"
+    "server": "node bin/yapper.js server",
+    "gui:dev:vite": "vite",
+    "gui:dev:electron": "wait-on tcp:127.0.0.1:5173 && cross-env YAPPER_DEV=1 electron electron/main.cjs",
+    "gui:dev": "concurrently -k -n vite,electron -c cyan,green \"npm:gui:dev:vite\" \"npm:gui:dev:electron\"",
+    "gui:start": "electron electron/main.cjs",
+    "gui:build:renderer": "vite build",
+    "gui:build": "vite build && electron-builder"
   },
   "keywords": [
     "voip",
@@ -51,7 +57,34 @@
     "@jitsi/rnnoise-wasm": "^0.2.1",
     "conf": "^15.1.0",
     "opusscript": "^0.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "terminal-kit": "^3.1.2",
     "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
+    "vite": "^6.0.7",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.yapper.desktop",
+    "productName": "Yapper",
+    "extraMetadata": { "main": "electron/main.cjs" },
+    "directories": { "output": "release" },
+    "files": [
+      "electron/**/*",
+      "src/**/*",
+      "audio/**/*",
+      "dist-renderer/**/*",
+      "package.json"
+    ],
+    "win": { "target": "nsis" },
+    "linux": { "target": "AppImage" },
+    "mac": { "target": "dmg" }
   }
 }

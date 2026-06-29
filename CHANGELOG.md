@@ -6,6 +6,44 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.3.3
+
+### Русский
+- Появилось десктоп-приложение (GUI) на Electron + React — с той же логикой, что
+  и терминальная версия: LAN-обнаружение, выбор хоста, голос по UDP (с откатом на
+  WS), румы и чат. Терминальный и оконный клиенты видят друг друга и работают в
+  одной сети. Запуск для разработки — `npm run gui:dev`, сборка установщика — `npm
+  run gui:build` (electron-builder). Терминальная версия остаётся как лёгкий
+  вариант: теперь это две оболочки над одним общим ядром.
+- Внутренний рефактор: общее состояние, обработчики и мутаторы вынесены в
+  UI-независимое ядро (`src/client/core/store.js`), так что TUI и GUI делят одну
+  логику без дублирования. Поведение терминала не изменилось.
+- Стартовый экран в терминале: большая анимированная надпись «YAPPER» (ASCII-арт)
+  с одним из 7 случайных эффектов при каждом запуске — перелив, звёздное поле,
+  «матрица», градиент, глитч, вспышка-искры, неон. Пропуск — любая клавиша или
+  клик. После заставки интерфейс с румами плавно проявляется из чёрного.
+- Анимированный фон главного экрана на выбор в настройках: выкл / звёзды / дождь /
+  аврора. Рисуется только в пустых местах (за текстом и рамками — никогда), мягко
+  и приглушённо. Переключается в «settings → background», применяется вживую.
+
+### English
+- New desktop app (GUI) built on Electron + React — same logic as the terminal
+  build: LAN discovery, host election, UDP voice (with WS fallback), rooms and
+  chat. The terminal and window clients see each other and work on one network.
+  Dev run is `npm run gui:dev`; build an installer with `npm run gui:build`
+  (electron-builder). The TUI stays as the lightweight option — the two are now
+  fronts over one shared core.
+- Internal refactor: shared state, handlers and mutators moved into a UI-agnostic
+  core (`src/client/core/store.js`) so the TUI and GUI share one source of truth
+  with no duplication. Terminal behaviour is unchanged.
+- Terminal startup splash: a big animated "YAPPER" ASCII-art title with one of 7
+  random effects each launch — shimmer, starfield, matrix rain, gradient, glitch,
+  sparkle burst, neon. Skip with any key or click. After it, the room UI fades up
+  smoothly out of black.
+- Animated background for the main screen, selectable in settings: off / stars /
+  rain / aurora. Painted only into blank cells (never over text or borders), dim
+  and subtle. Switch it in "settings → background"; applies live.
+
 ## 0.3.2
 
 ### Русский
