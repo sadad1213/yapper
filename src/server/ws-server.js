@@ -24,7 +24,7 @@ function roomList() {
   for (const client of clients.values()) {
     if (!client.room) continue
     if (!map.has(client.room)) map.set(client.room, { name: client.room, users: [] })
-    map.get(client.room).users.push({ id: client.id, name: client.username, muted: !!client.muted })
+    map.get(client.room).users.push({ id: client.id, name: client.username, muted: !!client.muted, deafened: !!client.deafened })
   }
   return [...map.values()]
 }
@@ -79,6 +79,9 @@ function handleSignal(ws, msg) {
   } else if (msg.type === 'mute') {
     client.muted = !!msg.muted
     broadcast({ type: 'user_mute', userId: client.id, muted: client.muted })
+  } else if (msg.type === 'deafen') {
+    client.deafened = !!msg.deafened
+    broadcast({ type: 'user_deafen', userId: client.id, deafened: client.deafened })
   } else if (msg.type === 'chat') {
     if (!client.room) return
     const text = String(msg.text || '').trim().slice(0, 300)
@@ -163,7 +166,7 @@ export function startWsServer(port = DEFAULT_PORT) {
     wss.on('connection', (ws) => {
       const id = nextId > 255 ? (nextId = 1) : nextId++
       const token = randomBytes(4).toString('hex')
-      const client = { id, username: `user${id}`, room: null, muted: false, ws, token, udp: null, udpSeen: 0 }
+      const client = { id, username: `user${id}`, room: null, muted: false, deafened: false, ws, token, udp: null, udpSeen: 0 }
       clients.set(ws, client)
       byToken.set(token, client)
 

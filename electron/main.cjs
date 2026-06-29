@@ -24,6 +24,7 @@ let mods = null            // loaded ESM module namespaces
 let audioApi = null        // { available, getInputDevices, setInputDevice, startMicTest }
 let networkShutdown = null // releases host ports (WS/discovery/UDP) on quit
 let micTestStop = null     // active mic-test teardown fn, if any
+let muteBeforeDeafen = false // mic state to restore when un-deafening (Discord-style)
 
 // ─── Renderer bridge ─────────────────────────────────────────────────────────
 function snapshot() {
@@ -34,6 +35,7 @@ function snapshot() {
     username: state.username,
     userId: state.userId,
     muted: state.muted,
+    deafened: state.deafened,
     connected: state.connected,
     serverAddr: state.serverAddr,
     talking: [...state.talking],          // Set → array for IPC
@@ -148,6 +150,15 @@ function registerIpc() {
   const { store, settings, autoUpdate } = mods
   const { handlers } = store
 
+  // Set mic mute + notify the server; `playSound:false` when deafen drives it so
+  // only the swipe chime is heard (no double sound).
+  const setMutedState = (muted, playSound) => {
+    if (store.state.muted === muted) return
+    store.state.muted = muted
+    handlers.onMute?.(muted)
+    if (playSound) (muted ? mods.notifications.notifyMuted() : mods.notifications.notifyUnmuted())
+  }
+
   // Room / chat / identity actions — fire-and-forget.
   ipcMain.on('action', (_e, { type, payload }) => {
     switch (type) {
@@ -156,7 +167,16 @@ function registerIpc() {
       case 'create':   handlers.onCreate?.(payload); break
       case 'delete':   handlers.onDelete?.(payload); break
       case 'chat':     handlers.onChat?.(payload); break
-      case 'mute':     store.state.muted = !!payload; handlers.onMute?.(!!payload); (payload ? mods.notifications.notifyMuted() : mods.notifications.notifyUnmuted()); pushState(); break
+      case 'mute':     setMutedState(!!payload, true); pushState(); break
+      case 'deafen': {
+        const on = !!payload
+        store.state.deafened = on
+        mods.audio.setDeafened(on)
+        if (on) { muteBeforeDeafen = store.state.muted; setMutedState(true, false); mods.notifications.notifyDeafened() }
+        else    { setMutedState(muteBeforeDeafen, false); mods.notifications.notifyUndeafened() }
+        pushState()
+        break
+      }
       case 'identify': { const u = settings.setUsername(payload); store.state.username = u; handlers.onIdentify?.(u); pushState(); break }
       case 'quit':     app.quit(); break
     }

@@ -27,6 +27,7 @@ export const state = {
   username: String(config.get('username') || ('user' + (Math.floor(Math.random() * 9000) + 1000))),
   userId: null,
   muted: false,
+  deafened: false,           // local: stop hearing others (Discord-style deafen)
   connected: false,
   serverAddr: null,
   talking: new Set(),
@@ -37,7 +38,7 @@ export const state = {
 
 // Filled in by the network layer (ws-client wireHandlers) and the audio wrapper.
 export const handlers = {
-  onJoin: null, onLeave: null, onCreate: null, onDelete: null, onMute: null, onForcedLeave: null, onDisconnect: null, onChat: null, onIdentify: null,
+  onJoin: null, onLeave: null, onCreate: null, onDelete: null, onMute: null, onDeafen: null, onForcedLeave: null, onDisconnect: null, onChat: null, onIdentify: null,
 }
 
 const CHAT_CAP = 200         // messages kept per room client-side (matches the host)

@@ -8,7 +8,7 @@ import VolumePopup from './components/VolumePopup.jsx'
 import StatusBar from './components/StatusBar.jsx'
 
 const EMPTY = {
-  rooms: [], currentRoom: null, username: '…', userId: null, muted: false,
+  rooms: [], currentRoom: null, username: '…', userId: null, muted: false, deafened: false,
   connected: false, serverAddr: null, talking: [], chat: {}, unread: {},
   audioAvailable: false, appVersion: '',
 }
@@ -67,6 +67,7 @@ export default function App() {
       <StatusBar
         state={state}
         onToggleMute={() => api.setMuted(!state.muted)}
+        onToggleDeafen={() => api.setDeafened(!state.deafened)}
         onNewRoom={() => { setNewRoomDraft(''); setNewRoomOpen(true) }}
         onSettings={() => setSettingsOpen(true)}
         onQuit={() => api.quit()}

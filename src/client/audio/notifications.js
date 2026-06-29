@@ -67,7 +67,31 @@ export async function notifyUpdateFound() {
   playSystemSound(await loadSound('update'))
 }
 
-/** Play the local mute / unmute feedback.  Call when the local mic toggle
- *  flips so the user hears confirmation through their speakers. */
-export async function notifyMuted()   { playSystemSound(await loadSound('mute')) }
-export async function notifyUnmuted() { playSystemSound(await loadSound('unmute')) }
+// Resample 48 kHz mono PCM to shift pitch (and tempo) by `factor`: >1 raises the
+// pitch (shorter), <1 lowers it. Linear interpolation — plenty for a short SFX.
+function pitchShift(pcm, factor) {
+  if (!pcm || pcm.length < 2 || factor === 1) return pcm
+  const inN = pcm.length >> 1
+  const outN = Math.max(1, Math.floor(inN / factor))
+  const out = Buffer.alloc(outN * 2)
+  for (let i = 0; i < outN; i++) {
+    const sp = i * factor
+    const i0 = Math.floor(sp), i1 = Math.min(i0 + 1, inN - 1), fr = sp - i0
+    const s = pcm.readInt16LE(i0 * 2) * (1 - fr) + pcm.readInt16LE(i1 * 2) * fr
+    out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(s))), i * 2)
+  }
+  return out
+}
+
+async function playPitched(sound, factor) { playSystemSound(pitchShift(await loadSound(sound), factor)) }
+
+// Mic mute/unmute → piano (mus_piano5.wav), deafen/undeafen → swipe (mus_sfx_swipe.wav)
+// Each pair pitched apart by 1.0:
+//   mute 0.70  ·  unmute 1.70
+//   deafen 0.70  ·  undeafen 1.70
+/** Local mic mute / unmute feedback. */
+export async function notifyMuted()      { playPitched('mute', 1.00) }
+export async function notifyUnmuted()    { playPitched('mute', 2.00) }
+/** Deafen on/off feedback. */
+export async function notifyDeafened()    { playPitched('swipe', 0.70) }
+export async function notifyUndeafened()  { playPitched('swipe', 1.70) }

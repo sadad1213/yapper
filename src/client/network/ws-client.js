@@ -115,6 +115,14 @@ function handleSignal(msg) {
       updateState({ rooms })
       break
     }
+    case 'user_deafen': {
+      const rooms = state.rooms.map(r => ({
+        ...r,
+        users: r.users.map(u => u.id === msg.userId ? { ...u, deafened: msg.deafened } : u),
+      }))
+      updateState({ rooms })
+      break
+    }
     case 'chat':
       addChatMessage(msg.room, msg.msg)
       break
@@ -151,6 +159,7 @@ export function wireHandlers() {
   }
   handlers.onDelete = (room) => send({ type: 'delete', room })
   handlers.onMute = (muted) => send({ type: 'mute', muted })
+  handlers.onDeafen = (deafened) => send({ type: 'deafen', deafened })
   handlers.onIdentify = (username) => send({ type: 'identify', username })
   handlers.onChat = (text) => send({ type: 'chat', text })
   handlers.onDisconnect = disconnect

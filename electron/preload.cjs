@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('yapper', {
   remove: (room) => ipcRenderer.send('action', { type: 'delete', payload: room }),
   chat: (text) => ipcRenderer.send('action', { type: 'chat', payload: text }),
   setMuted: (muted) => ipcRenderer.send('action', { type: 'mute', payload: muted }),
+  setDeafened: (on) => ipcRenderer.send('action', { type: 'deafen', payload: on }),
   quit: () => ipcRenderer.send('action', { type: 'quit' }),
 
   // Request/response settings + devices.

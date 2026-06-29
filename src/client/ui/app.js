@@ -3,8 +3,8 @@ import Conf from 'conf'
 import { createRequire } from 'module'
 import { getThreshold, setThreshold } from '../audio/vad.js'
 import { setDenoiseEnabled, isDenoiseEnabled, isDenoiseAvailable } from '../audio/denoise.js'
-import { getUserVolume, setUserVolume } from '../audio/playback.js'
-import { notifyUpdateFound, notifyMuted, notifyUnmuted, notifyLeaving } from '../audio/notifications.js'
+import { getUserVolume, setUserVolume, setDeafened } from '../audio/playback.js'
+import { notifyUpdateFound, notifyMuted, notifyUnmuted, notifyLeaving, notifyDeafened, notifyUndeafened } from '../audio/notifications.js'
 import { state, handlers, events, MAX_CHATMSG } from '../core/store.js'
 import { preloadAll } from '../audio/loader.js'
 import { checkForUpdate, clearPendingUpdate, checkForUpdateManual, fetchChangelog } from '../../auto-update.js'
@@ -373,18 +373,21 @@ function drawUsers() {
   // Participant list — self sits at the top, right among everyone else.
   let y = firstRow
   drawUserRow(y++, state.username + ' (you)', {
-    self: true, muted: state.muted,
+    self: true, muted: state.muted, deafened: state.deafened,
     talking: !state.muted && state.selfLevel > 0.05,
   }, usersX, usersW)
   for (const u of others) {
     if (y > lastRow - 1) break
-    drawUserRow(y, u.name, { talking: state.talking.has(u.id), muted: u.muted, seed: u.id }, usersX, usersW)
+    drawUserRow(y, u.name, { talking: state.talking.has(u.id), muted: u.muted, deafened: u.deafened, seed: u.id }, usersX, usersW)
     ui.userZones.push({ x0: usersX, x1: usersX + usersW, y, userId: u.id, username: u.name })
     y++
   }
 
-  // Mic-level bar pinned at the bottom of the column.
-  if (state.muted) {
+  // Mic-level bar pinned at the bottom of the column (deafen takes precedence —
+  // you can't hear anyone, which is the more important state to surface).
+  if (state.deafened) {
+    putStr(usersX, lastRow, padEnd('deafened · you hear no one', usersW), { color: 'red', dim: true })
+  } else if (state.muted) {
     putStr(usersX, lastRow, 'your mic · muted', { color: 'red', dim: true })
   } else {
     putStr(usersX, lastRow, 'your mic', { dim: true })
@@ -395,13 +398,25 @@ function drawUsers() {
 }
 
 function drawUserRow(y, name, o, colX, colW) {
-  const icon = o.muted ? '⊘' : (o.talking ? '◉' : '○')
-  const iconAttr = o.muted ? { color: 'red' } : (o.talking ? { color: 'green', bold: true } : { dim: true })
+  // Left icon = speaking/idle/off state; deafen takes precedence over mute (it
+  // implies the mic is off too) and uses its own glyph + colour.
+  let icon, iconAttr
+  if (o.deafened)     { icon = '⊗'; iconAttr = { color: 'red', bold: true } }
+  else if (o.muted)   { icon = '⊘'; iconAttr = { color: 'red' } }
+  else if (o.talking) { icon = '◉'; iconAttr = { color: 'green', bold: true } }
+  else                { icon = '○'; iconAttr = { dim: true } }
   putStr(colX, y, icon, iconAttr)
-  // Narrow column: icon + name only. Talking/mute is conveyed by the icon colour.
-  const nameW = Math.max(4, colW - 3)
-  const nameAttr = o.self ? { color: 'cyan', bold: true } : (o.talking ? { color: 'green', bold: true } : o.muted ? { dim: true } : {})
+
+  // A short text tag pinned to the right of the column makes the state explicit —
+  // a coloured symbol alone reads as "just a red mark".
+  const tag = o.deafened ? 'deafened' : o.muted ? 'muted' : ''
+  const tagW = tag ? tag.length + 1 : 0
+  const nameW = Math.max(4, colW - 3 - tagW)
+  const nameAttr = o.self ? { color: 'cyan', bold: true }
+                 : o.talking ? { color: 'green', bold: true }
+                 : (o.muted || o.deafened) ? { dim: true } : {}
   putStr(colX + 2, y, padEnd(name, nameW), nameAttr)
+  if (tag) putStr(colX + 3 + nameW, y, tag, { color: 'red', dim: true })
 }
 
 const URL_RE = /^https?:\/\/[^\s]+$/i
@@ -501,6 +516,7 @@ function drawStatus() {
     x += label.length + 3
   }
   seg(state.muted ? '[M] unmute' : '[M] mute', toggleMute, state.muted ? { color: 'red', bold: true } : {})
+  seg(state.deafened ? '[H] undeafen' : '[H] deafen', toggleDeafen, state.deafened ? { color: 'red', bold: true } : {})
   seg('[N] new room', promptNewRoom)
   seg('[S] settings', openSettings)
   if (updateAvailable) seg('[U] update!', runUpdate, { color: 'yellow', bold: true })
@@ -848,6 +864,7 @@ function handleKey(name, matches, data) {
     case 'TAB':   if (state.currentRoom) { ui.chat.focused = true; ui.dirty = true } break
     case 'ESCAPE': if (state.currentRoom && handlers.onLeave) { notifyLeaving(); handlers.onLeave(); } break
     case 'm': case 'M': toggleMute(); break
+    case 'h': case 'H': toggleDeafen(); break
     case 's': case 'S': openSettings(); break
     case 'n': case 'N': promptNewRoom(); break
     case 'd': case 'D': if (!ui.modal && !ui.prompt && !ui.volumePopup && !ui.changelog && !ui.confirm) promptDeleteRoom(); break
@@ -1049,12 +1066,36 @@ function joinRoom(name) {
   ui.dirty = true
 }
 
-function toggleMute() {
-  state.muted = !state.muted
-  handlers.onMute?.(state.muted)
-  // Local confirmation chime through the speakers.  Fire-and-forget — the
-  // sounds are pre-loaded at startup, so this is effectively instant.
-  if (state.muted) notifyMuted(); else notifyUnmuted()
+// Set the mic mute state, notify the server (so others see the icon), and
+// optionally play the piano chime. `playSound:false` is used when deafen drives
+// the mute, so only the swipe is heard (no double chime).
+function setMutedState(muted, playSound) {
+  if (state.muted === muted) return
+  state.muted = muted
+  handlers.onMute?.(muted)
+  if (playSound) { if (muted) notifyMuted(); else notifyUnmuted() }
+  ui.dirty = true
+}
+
+function toggleMute() { setMutedState(!state.muted, true) }
+
+let _muteBeforeDeafen = false   // mic state to restore when un-deafening
+
+// Deafen: stop hearing everyone (local — no server message) and, Discord-style,
+// also mute your mic. Un-deafening restores the mic to its pre-deafen state. The
+// swipe chime is pitched lower when deafening, higher when un-deafening.
+function toggleDeafen() {
+  state.deafened = !state.deafened
+  setDeafened(state.deafened)
+  handlers.onDeafen?.(state.deafened)     // tell the room so others see the headphone icon
+  if (state.deafened) {
+    _muteBeforeDeafen = state.muted
+    setMutedState(true, false)            // force-mute silently; swipe is the cue
+    notifyDeafened()
+  } else {
+    setMutedState(_muteBeforeDeafen, false)
+    notifyUndeafened()
+  }
   ui.dirty = true
 }
 

@@ -1,9 +1,13 @@
-import { execSync } from 'child_process'
+import { execSync, spawn } from 'child_process'
 import { EventEmitter } from 'events'
 import { SAMPLE_RATE, CHANNELS } from './capture.js'
 import { Capture } from './capture.js'
 import { initPlayback, startMixer, stopMixer, pauseMixer, queueFrame } from './playback.js'
 import { initDenoise } from './denoise.js'
+
+// Re-exported so UI layers (TUI app.js, GUI main) can toggle deafen without
+// reaching into playback.js directly.
+export { setDeafened, isDeafened } from './playback.js'
 
 // Emits 'level' (0..1) on every captured frame — used by the UI VU meter.
 export const audioEvents = new EventEmitter()
@@ -85,6 +89,7 @@ export async function initAudio() {
   // Fall back to SoX
   if (hasSox()) {
     backend = 'sox'
+    warmWinMics()                    // pre-fetch real Windows mic names in the background
     soxMod = await import('./sox.js')
     outStream = new soxMod.SoxPlayback()
     initPlayback(decoder, outStream)
@@ -101,6 +106,71 @@ export async function initAudio() {
   }
 }
 
+// ─── Windows microphone names (SoX backend) ─────────────────────────────────────
+// SoX's waveaudio driver addresses inputs by index only — it can't name them, so
+// the UI used to show "Device 0/1/2". WinMM's waveInGetDevCaps enumerates inputs in
+// the *same order* SoX uses, with real names, so we query it (via PowerShell P/Invoke)
+// and map index→name. Names are capped at 31 chars by the MME API, but that still
+// identifies the mic. Warmed once asynchronously at init so opening settings is instant.
+let _winMics = null            // [{ id, name }] once resolved (kept as the SoX index list)
+let _winMicsTried = false       // we've attempted enumeration (success or not)
+
+function micEnumScript() {
+  return [
+    "$ErrorActionPreference='SilentlyContinue'",
+    '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8',
+    'Add-Type @"',
+    'using System;',
+    'using System.Runtime.InteropServices;',
+    'public class YapWaveIn {',
+    '  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]',
+    '  public struct CAPS {',
+    '    public ushort wMid; public ushort wPid; public uint vDriverVersion;',
+    '    [MarshalAs(UnmanagedType.ByValTStr, SizeConst=32)] public string szPname;',
+    '    public uint dwFormats; public ushort wChannels; public ushort wReserved1;',
+    '  }',
+    '  [DllImport("winmm.dll", CharSet=CharSet.Unicode)] public static extern uint waveInGetNumDevs();',
+    '  [DllImport("winmm.dll", CharSet=CharSet.Unicode)] public static extern uint waveInGetDevCapsW(UIntPtr id, ref CAPS c, uint cb);',
+    '}',
+    '"@',
+    '$n=[YapWaveIn]::waveInGetNumDevs()',
+    'for($i=0;$i -lt $n;$i++){',
+    "  $c=New-Object 'YapWaveIn+CAPS'",
+    "  $sz=[System.Runtime.InteropServices.Marshal]::SizeOf([type]'YapWaveIn+CAPS')",
+    '  $r=[YapWaveIn]::waveInGetDevCapsW([UIntPtr]([uint32]$i),[ref]$c,[uint32]$sz)',
+    '  if($r -eq 0){ Write-Output ("{0}\t{1}" -f $i,$c.szPname) }',
+    '}',
+  ].join('\n')
+}
+
+function parseMicLines(out) {
+  const devs = []
+  for (const line of String(out).split(/\r?\n/)) {
+    const tab = line.indexOf('\t')
+    if (tab < 0) continue
+    const id = Number(line.slice(0, tab))
+    if (!Number.isInteger(id)) continue
+    const name = line.slice(tab + 1).trim()
+    devs.push({ id, name: name || `Microphone ${id}` })
+  }
+  return devs
+}
+
+// Best-effort async enumeration. Never throws; populates _winMics when it succeeds.
+function warmWinMics() {
+  if (process.platform !== 'win32' || _winMicsTried) return
+  _winMicsTried = true
+  try {
+    const b64 = Buffer.from(micEnumScript(), 'utf16le').toString('base64')
+    const p = spawn('powershell', ['-NoProfile', '-NonInteractive', '-EncodedCommand', b64],
+      { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
+    let out = ''
+    p.stdout.on('data', (d) => { out += d.toString('utf8') })
+    p.on('error', () => {})
+    p.on('close', () => { const d = parseMicLines(out); if (d.length) _winMics = d })
+  } catch { /* leave _winMics null → generic fallback */ }
+}
+
 export function getInputDevices() {
   if (backend === 'naudiodon') {
     try {
@@ -110,7 +180,12 @@ export function getInputDevices() {
     } catch { return [{ id: -1, name: 'Default' }] }
   }
   if (backend === 'sox') {
-    // SoX can't name devices, but waveaudio addresses them by index.
+    // Real Windows mic names when we have them (warmed at init); otherwise the
+    // generic index list (also the case on Linux/macOS, where SoX uses -d/default).
+    if (process.platform === 'win32') {
+      if (_winMics && _winMics.length) return _winMics
+      warmWinMics()                          // kick off (or re-try) enumeration for next time
+    }
     return [
       { id: 0, name: 'Default mic (device 0)' },
       { id: 1, name: 'Device 1' },

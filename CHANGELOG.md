@@ -6,6 +6,38 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.3.4
+
+### Русский
+- Режим deafen (🎧): горячая клавиша [H] в TUI и кнопка «deafen» в GUI
+  глушат входящий звук и одновременно мьютят микрофон — как в Discord.
+  При выходе из deafen микрофон возвращается в предыдущее состояние (мьют
+  или активный). В списке участников глухие помечаются иконкой ⊗ и тегом
+  «deafened», а в своей панели пишется «deafened · you hear no one».
+  Сервер ретранслирует состояние deafen всей комнате.
+- Настоящие имена микрофонов на Windows (бэкенд SoX): через WinMM API
+  (PowerShell P/Invoke) получаются реальные названия устройств ввода вместо
+  «Device 0/1/2». Имена кешируются асинхронно при старте.
+- Звук deafen/undeafen: новый аудиофайл `mus_sfx_swipe.wav`, тон ниже при
+  глушении и выше при разглушении. Мьют/анмьют тоже используют один файл
+  (`mus_piano5.wav`) с разным питчем. Загрузчик звуков больше не падает,
+  если файла нет — просто молчит.
+
+### English
+- Deafen mode (🎧): [H] hotkey in the TUI and a "deafen" button in the GUI
+  stop incoming audio and mute the mic — Discord-style. Un-deafening restores
+  the mic to its previous state (muted or live). Deafened users show a ⊗ icon
+  and a "deafened" tag in the member list; your own panel reads "deafened ·
+  you hear no one". The server relays the deafen state to everyone in the
+  room.
+- Real microphone names on Windows (SoX backend): WinMM API (PowerShell
+  P/Invoke) provides the actual device names instead of "Device 0/1/2".
+  Enumerated async at startup and cached.
+- Deafen/undeafen sound: new `mus_sfx_swipe.wav` audio file, pitched lower
+  when deafening and higher when un-deafening. Mute/unmute now also reuse one
+  file (`mus_piano5.wav`) at different pitches. The sound loader no longer
+  crashes on a missing file — it silently produces silence.
+
 ## 0.3.3
 
 ### Русский

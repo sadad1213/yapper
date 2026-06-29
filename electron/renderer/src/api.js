@@ -4,7 +4,7 @@
 const noop = () => {}
 const stub = {
   onState: noop, onMicLevel: noop, onMicTestLevel: noop, onUpdateProgress: noop,
-  join: noop, leave: noop, create: noop, remove: noop, chat: noop, setMuted: noop, quit: noop,
+  join: noop, leave: noop, create: noop, remove: noop, chat: noop, setMuted: noop, setDeafened: noop, quit: noop,
   getSettings: async () => ({ username: 'you', vadThreshold: 200, vadMin: 50, vadMax: 3000, denoise: true, muteHotkey: 'off', userVolumes: {} }),
   setUsername: async (n) => n, setVadThreshold: async (v) => v, setDenoise: async (o) => o,
   getUserVolume: async () => 100, setUserVolume: async () => 100,

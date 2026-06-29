@@ -22,13 +22,16 @@ const FILES = {
   update: { path: join(ROOT, 'audio', 'snd_textnoise.wav'), ext: '.wav' },
   mute:   { path: join(ROOT, 'audio', 'mus_piano5.wav'),    ext: '.wav' },
   unmute: { path: join(ROOT, 'audio', 'mus_piano7.wav'),    ext: '.wav' },
+  // One swipe sound shared by deafen on/off — played at different pitch each way
+  // (see notifications.js). Missing-file safe: decodes to empty → silent.
+  swipe:  { path: join(ROOT, 'audio', 'mus_sfx_swipe.wav'), ext: '.wav' },
 }
 
 // Cached PCM buffers — decoded once, reused forever.
-const cache = { join: null, leave: null, update: null, mute: null, unmute: null }
+const cache = { join: null, leave: null, update: null, mute: null, unmute: null, swipe: null }
 
 // Map of pending decode promises so concurrent callers share one operation.
-const pending = { join: null, leave: null, update: null, mute: null, unmute: null }
+const pending = { join: null, leave: null, update: null, mute: null, unmute: null, swipe: null }
 
 // ─── SoX availability ───────────────────────────────────────────────────────
 
@@ -141,10 +144,11 @@ function wavToPCM(buf) {
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 async function decodeFile(info) {
-  // 1. SoX path — handles everything, best quality
+  // 1. SoX path — handles everything, best quality. A failure here (e.g. the file
+  //    isn't present) falls through to the JS decoder / empty buffer rather than
+  //    rejecting, so an absent optional sound is simply silent, never a crash.
   if (hasSox()) {
-    const pcm = await decodeWithSox(info.path)
-    return pcm
+    try { return await decodeWithSox(info.path) } catch { /* fall through */ }
   }
 
   // 2. Pure-JS path for WAV files

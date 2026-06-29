@@ -21,6 +21,19 @@ export function getUserVolume(userId) {
   return userVolumes.has(userId) ? userVolumes.get(userId) : 100
 }
 
+// Deafen: stop hearing other people. Incoming voice is dropped before it's even
+// decoded (queueFrame), and any already-buffered voice is cleared so it goes quiet
+// immediately. System sounds (the deafen chime itself) still play — they live in
+// the reserved SYSTEM_USER slot, which this never touches.
+let deafened = false
+export function setDeafened(on) {
+  deafened = !!on
+  if (deafened) {
+    for (const [id, u] of users) if (id !== SYSTEM_USER) u.frames.length = 0
+  }
+}
+export function isDeafened() { return deafened }
+
 let outputStream = null
 let decoder = null
 let timer = null
@@ -136,7 +149,7 @@ export function playSystemSound(pcmBuf) {
 }
 
 export function queueFrame(userId, opusData) {
-  if (!decoder) return
+  if (!decoder || deafened) return         // deafened → don't even decode incoming voice
   let pcm
   try { pcm = Buffer.from(decoder.decode(Buffer.from(opusData), FRAME_SIZE)) }
   catch { return }
