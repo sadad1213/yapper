@@ -6,6 +6,29 @@
 Everything that changed in each yapper release. Russian (RU) comes first,
 English (EN) translation below.
 
+## 0.3.6
+
+### Русский
+- Исправлено заикание чужого голоса из 0.3.5. Добавленный там «catch-up»
+  подрезал буфер воспроизведения при наплыве кадров и выбрасывал их — на слух
+  это «лагающий микрофон» собеседника. Наплывы — это норма: старая версия
+  шлёт пачками по ~85 мс, да и новый захват флашит pre-roll в начале слова.
+  Catch-up убран, вернулся прежний предел в 400 мс, который кадры в реальной
+  работе не трогает. Выигрыш по задержке сохранён — он от маленьких буферов
+  SoX, а не от catch-up.
+- Важно: для минимальной задержки и без заиканий оба собеседника должны быть
+  на 0.3.6+ — старая версия шлёт звук большими пачками.
+
+### English
+- Fixed the choppy-peer-audio regression from 0.3.5. The "catch-up" added there
+  trimmed the playback buffer on frame bursts and dropped frames — heard as the
+  other person's mic stuttering. Bursts are normal: an old client sends in
+  ~85 ms chunks, and even the new capture flushes a pre-roll at word onset.
+  Catch-up removed; the prior 400 ms cap is back and never trims in normal use.
+  The latency win is kept — it comes from the small SoX buffers, not catch-up.
+- Note: for lowest latency with no stutter, both peers should be on 0.3.6+ —
+  an old version transmits audio in large bursts.
+
 ## 0.3.5
 
 ### Русский
